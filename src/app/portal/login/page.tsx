@@ -72,7 +72,7 @@ export default function LoginPage() {
   async function handleReset() {
     setLoading(true); setMessage('')
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${location.origin}/portal/auth/callback`
+      redirectTo: `${location.origin}/portal/auth/callback?next=/portal/reset-password`
     })
     if (error) { setIsError(true); setMessage(error.message) }
     else { setIsError(false); setMessage('✓ Reset link verstuurd — check je email.') }

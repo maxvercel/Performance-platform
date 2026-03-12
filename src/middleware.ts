@@ -9,7 +9,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Public routes die GEEN auth nodig hebben
-  const publicPaths = ['/portal/login', '/portal/register']
+  const publicPaths = ['/portal/login', '/portal/register', '/portal/auth/callback', '/portal/reset-password', '/portal/bevestigd']
   if (publicPaths.some(p => pathname.startsWith(p))) {
     return NextResponse.next()
   }

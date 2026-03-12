@@ -91,10 +91,12 @@ export default function ProgressPage() {
     }
 
     const logIds = logs.map((l: any) => l.id)
-    const { data: exLogs } = await supabase
+    const { data: exLogs, error: exError } = await supabase
       .from('exercise_logs')
-      .select('*, exercises(name, muscle_group)')
+      .select('id, workout_log_id, exercise_id, set_number, weight_kg, reps_completed, exercises(name, muscle_group)')
       .in('workout_log_id', logIds)
+
+    if (exError) console.error('Exercise logs fetch error:', exError)
 
     // Enrich logs with exercise data
     const exLogsByWorkout: Record<string, any[]> = {}
