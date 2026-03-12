@@ -241,7 +241,8 @@ export default function TemplateEditorPage() {
 
       const data = await res.json()
       if (!res.ok || !data.success) {
-        alert(`Fout bij opslaan: ${data.error || data.message || 'Onbekende fout'}`)
+        const errDetail = data.errors?.length > 0 ? `\n\nDetails: ${data.errors.join('\n')}` : ''
+        alert(`Fout bij opslaan: ${data.error || data.message || 'Onbekende fout'}${errDetail}`)
       } else {
         alert(`Template opgeslagen! (${data.savedCount} oefeningen)`)
       }

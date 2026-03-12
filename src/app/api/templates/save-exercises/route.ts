@@ -41,19 +41,44 @@ export async function POST(request: Request) {
   }
 
   // Verify user owns this template
-  const { data: tmpl } = await supabase
+  const { data: tmpl, error: tmplErr } = await supabase
     .from('program_templates')
     .select('id, coach_id')
     .eq('id', templateId)
     .single()
 
-  if (!tmpl || tmpl.coach_id !== user.id) {
-    return NextResponse.json({ error: 'Template niet gevonden of geen toegang' }, { status: 403 })
+  if (tmplErr || !tmpl) {
+    return NextResponse.json({
+      error: `Template niet gevonden: ${tmplErr?.message ?? 'onbekend'}`,
+      debug: { templateId, tmplErr }
+    }, { status: 403 })
+  }
+
+  if (tmpl.coach_id !== user.id) {
+    return NextResponse.json({
+      error: 'Geen toegang tot dit template',
+      debug: { tmplCoachId: tmpl.coach_id, userId: user.id }
+    }, { status: 403 })
+  }
+
+  // Quick check: verify table is accessible
+  const { error: tableErr } = await supabase
+    .from('template_exercises')
+    .select('id')
+    .limit(1)
+
+  if (tableErr) {
+    return NextResponse.json({
+      success: false,
+      error: `template_exercises niet bereikbaar: ${tableErr.message} (${tableErr.code})`,
+      message: `Tabel error: ${tableErr.message}`,
+    }, { status: 500 })
   }
 
   // Save exercises per day
   let savedCount = 0
   let errorCount = 0
+  const errors: string[] = []
 
   for (const [dayId, dayExercises] of Object.entries(exercises)) {
     // Delete existing exercises for this day
@@ -63,21 +88,21 @@ export async function POST(request: Request) {
       .eq('day_id', dayId)
 
     if (delError) {
-      console.error(`Delete error for day ${dayId}:`, delError)
+      errors.push(`DELETE ${dayId}: ${delError.message} (${delError.code})`)
       errorCount++
       continue
     }
 
     // Insert new exercises
     if (dayExercises.length > 0) {
-      const rows = dayExercises.map((ex, i) => ({
+      const rows = dayExercises.map((ex: any, i: number) => ({
         day_id: dayId,
-        exercise_name: ex.name?.trim() || 'Unnamed',
-        sets: ex.sets ?? 3,
-        reps: ex.reps ?? '8-10',
-        weight_kg: ex.weight_kg ?? null,
-        rest_seconds: ex.rest_seconds ?? 90,
-        notes: ex.notes ?? null,
+        exercise_name: String(ex.name ?? '').trim() || 'Unnamed',
+        sets: Number(ex.sets) || 3,
+        reps: String(ex.reps ?? '8-10'),
+        weight_kg: ex.weight_kg != null ? Number(ex.weight_kg) : null,
+        rest_seconds: Number(ex.rest_seconds) || 90,
+        notes: ex.notes ? String(ex.notes) : null,
         order_index: i,
       }))
 
@@ -86,7 +111,7 @@ export async function POST(request: Request) {
         .insert(rows)
 
       if (insError) {
-        console.error(`Insert error for day ${dayId}:`, insError)
+        errors.push(`INSERT ${dayId} (${rows.length}): ${insError.message} (${insError.code})`)
         errorCount++
       } else {
         savedCount += rows.length
@@ -98,8 +123,9 @@ export async function POST(request: Request) {
     success: errorCount === 0,
     savedCount,
     errorCount,
+    errors: errors.slice(0, 5),
     message: errorCount === 0
       ? `${savedCount} oefeningen opgeslagen`
-      : `${savedCount} opgeslagen, ${errorCount} fouten`
+      : `${savedCount} opgeslagen, ${errorCount} fouten`,
   })
 }
