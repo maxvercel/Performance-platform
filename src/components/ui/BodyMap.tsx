@@ -59,12 +59,12 @@ export const BodyMap: React.FC<BodyMapProps> = ({
   const viewBoxHeight = 400;
 
   return (
-    <div className={`flex justify-center items-center ${getGlowClass('')}`}>
+    <div className={`flex justify-center items-center max-w-full overflow-hidden ${getGlowClass('')}`}>
       <svg
         viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
         width={config.width}
         height={config.height}
-        className="drop-shadow-lg"
+        className="drop-shadow-lg max-w-full h-auto"
         xmlns="http://www.w3.org/2000/svg"
       >
         <defs>

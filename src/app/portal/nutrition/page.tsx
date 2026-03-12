@@ -308,7 +308,7 @@ export default function NutritionPage() {
                   )}
                   <button
                     onClick={() => { setAddMealType(mt.key); setShowQuickAdd(true) }}
-                    className="w-8 h-8 bg-orange-500/15 text-orange-400 rounded-xl
+                    className="w-11 h-11 bg-orange-500/15 text-orange-400 rounded-xl
                                flex items-center justify-center text-lg hover:bg-orange-500/25 transition"
                   >
                     +
@@ -330,7 +330,7 @@ export default function NutritionPage() {
                         </div>
                       </div>
                       <button onClick={() => deleteMeal(entry.id)}
-                        className="text-zinc-700 hover:text-red-400 text-sm transition ml-2">×</button>
+                        className="w-9 h-9 flex items-center justify-center text-zinc-700 hover:text-red-400 text-lg transition ml-2 rounded-lg">×</button>
                     </div>
                   ))}
                 </div>
@@ -377,8 +377,10 @@ export default function NutritionPage() {
 
       {/* Quick Add Modal */}
       {showQuickAdd && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50">
-          <div className="bg-zinc-900 border-t border-zinc-800 rounded-t-3xl w-full max-w-lg max-h-[85vh] overflow-hidden">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end justify-center z-50"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowQuickAdd(false) }}>
+          <div className="bg-zinc-900 border-t border-zinc-800 rounded-t-3xl w-full max-w-lg max-h-[90vh] overflow-hidden"
+            style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
               <h3 className="text-white font-bold">
                 {MEAL_TYPES.find(m => m.key === addMealType)?.icon}{' '}
@@ -412,19 +414,19 @@ export default function NutritionPage() {
                     placeholder="Naam (bijv. Kipfilet met rijst)"
                     className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-orange-500" />
                   <div className="grid grid-cols-2 gap-2">
-                    <input type="number" value={form.calories}
+                    <input type="number" inputMode="numeric" value={form.calories}
                       onChange={e => setForm(p => ({ ...p, calories: e.target.value }))}
                       placeholder="Calorieën (kcal)"
                       className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-orange-500" />
-                    <input type="number" value={form.protein_g}
+                    <input type="number" inputMode="decimal" value={form.protein_g}
                       onChange={e => setForm(p => ({ ...p, protein_g: e.target.value }))}
                       placeholder="Eiwit (g)"
                       className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-blue-500" />
-                    <input type="number" value={form.carbs_g}
+                    <input type="number" inputMode="decimal" value={form.carbs_g}
                       onChange={e => setForm(p => ({ ...p, carbs_g: e.target.value }))}
                       placeholder="Koolhydraten (g)"
                       className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-orange-500" />
-                    <input type="number" value={form.fat_g}
+                    <input type="number" inputMode="decimal" value={form.fat_g}
                       onChange={e => setForm(p => ({ ...p, fat_g: e.target.value }))}
                       placeholder="Vet (g)"
                       className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-yellow-500" />
@@ -442,31 +444,33 @@ export default function NutritionPage() {
 
       {/* Target modal */}
       {showTargetModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm p-5">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowTargetModal(false) }}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5"
+            style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom, 0px))' }}>
             <h3 className="text-white font-bold text-lg mb-4">Dagelijkse doelen</h3>
             <div className="space-y-3">
               <div>
                 <label className="text-zinc-400 text-xs font-bold mb-1 block">Calorieën (kcal)</label>
-                <input type="number" value={targets.calories}
+                <input type="number" inputMode="numeric" value={targets.calories}
                   onChange={e => setTargets(p => ({ ...p, calories: parseInt(e.target.value) || 0 }))}
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500" />
               </div>
               <div>
                 <label className="text-blue-400 text-xs font-bold mb-1 block">Eiwit (g)</label>
-                <input type="number" value={targets.protein_g}
+                <input type="number" inputMode="numeric" value={targets.protein_g}
                   onChange={e => setTargets(p => ({ ...p, protein_g: parseInt(e.target.value) || 0 }))}
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-500" />
               </div>
               <div>
                 <label className="text-orange-400 text-xs font-bold mb-1 block">Koolhydraten (g)</label>
-                <input type="number" value={targets.carbs_g}
+                <input type="number" inputMode="numeric" value={targets.carbs_g}
                   onChange={e => setTargets(p => ({ ...p, carbs_g: parseInt(e.target.value) || 0 }))}
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500" />
               </div>
               <div>
                 <label className="text-yellow-400 text-xs font-bold mb-1 block">Vet (g)</label>
-                <input type="number" value={targets.fat_g}
+                <input type="number" inputMode="numeric" value={targets.fat_g}
                   onChange={e => setTargets(p => ({ ...p, fat_g: parseInt(e.target.value) || 0 }))}
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-yellow-500" />
               </div>

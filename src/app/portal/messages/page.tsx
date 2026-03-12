@@ -89,7 +89,7 @@ export default function MessagesPage() {
   )
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col pb-24">
+    <div className="min-h-screen bg-zinc-950 flex flex-col pb-20">
 
       <div className="bg-zinc-900 px-5 pt-12 pb-4 border-b border-zinc-800 flex-shrink-0">
         <p className="text-orange-500 text-xs font-bold tracking-widest uppercase mb-1">Berichten</p>
@@ -140,7 +140,7 @@ export default function MessagesPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="bg-zinc-900 border-t border-zinc-800 px-4 py-3 flex-shrink-0">
+      <div className="bg-zinc-900 border-t border-zinc-800 px-4 py-3 flex-shrink-0 mb-16">
         <div className="flex gap-2">
           <input
             type="text"

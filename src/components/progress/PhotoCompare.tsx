@@ -99,7 +99,7 @@ export default function PhotoCompare({
       </button>
 
       {/* Comparison Container */}
-      <div className="w-full max-w-4xl">
+      <div className="w-full max-w-4xl max-h-full overflow-hidden">
         {/* Header */}
         <div className="mb-4 text-center">
           <h3 className="text-2xl font-bold text-white mb-2">Voortgang</h3>
@@ -168,7 +168,7 @@ export default function PhotoCompare({
             onTouchStart={handleTouchStart}
           >
             {/* Handle Icon */}
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 -translate-x-0.5 w-10 h-10 bg-orange-500 rounded-full shadow-lg flex items-center justify-center pointer-events-none">
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-orange-500 rounded-full shadow-lg flex items-center justify-center pointer-events-none">
               <div className="flex gap-1">
                 <div className="w-0.5 h-4 bg-white rounded-full" />
                 <div className="w-0.5 h-4 bg-white rounded-full" />

@@ -40,9 +40,10 @@ function BottomNav() {
         <path d="M6 4v16M18 4v16M3 8h4M17 8h4M3 16h4M17 16h4"/>
       </svg>
     )},
-    { href: '/portal/habits', label: 'Habits', icon: (
+    { href: '/portal/nutrition', label: 'Voeding', icon: (
       <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+        <path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/>
+        <line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>
       </svg>
     )},
     { href: '/portal/progress', label: 'Progress', icon: (

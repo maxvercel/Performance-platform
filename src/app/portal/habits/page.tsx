@@ -217,7 +217,7 @@ export default function HabitsPage() {
                   <button
                     onClick={() => toggleHabit(habit)}
                     disabled={saving === habit.id}
-                    className={`w-10 h-10 rounded-xl flex items-center justify-center transition flex-shrink-0 ${
+                    className={`w-11 h-11 rounded-xl flex items-center justify-center transition flex-shrink-0 ${
                       completed
                         ? 'bg-green-500 text-white'
                         : 'bg-zinc-800 text-zinc-500 hover:bg-orange-500 hover:text-white'
@@ -236,10 +236,11 @@ export default function HabitsPage() {
                     <div className="flex items-center gap-3">
                       <input
                         type="number"
+                        inputMode="decimal"
                         value={log?.value ?? ''}
                         onChange={e => updateValue(habit, parseFloat(e.target.value) || 0)}
                         placeholder="0"
-                        className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2
+                        className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5
                                    text-white text-sm text-center focus:outline-none focus:border-orange-500"
                         aria-label={`${habit.name} waarde`}
                       />

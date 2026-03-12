@@ -308,6 +308,7 @@ export function ActiveWorkout({
                       <div className="relative">
                         <input
                           type="number"
+                          inputMode="decimal"
                           value={set.weight}
                           onChange={e => onSetChange(pe.id, si, 'weight', e.target.value)}
                           placeholder="kg"
@@ -326,6 +327,7 @@ export function ActiveWorkout({
                       <span className="text-zinc-600 text-xs">kg</span>
                       <input
                         type="number"
+                        inputMode="numeric"
                         value={set.reps}
                         onChange={e => onSetChange(pe.id, si, 'reps', e.target.value)}
                         placeholder="reps"
@@ -337,7 +339,7 @@ export function ActiveWorkout({
                       <button
                         onClick={() => onToggleSet(pe.id, si)}
                         aria-label={set.done ? `Set ${si + 1} ongedaan maken` : `Set ${si + 1} voltooien`}
-                        className={`ml-auto w-8 h-8 rounded-xl flex items-center justify-center
+                        className={`ml-auto w-11 h-11 rounded-xl flex items-center justify-center
                                     transition font-bold text-sm ${
                           set.done
                             ? 'bg-green-500 text-white'
