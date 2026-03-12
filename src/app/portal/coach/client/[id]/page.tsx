@@ -1,8 +1,8 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useParams } from 'next/navigation'
-import { formatDistanceToNow, parseISO, format, differenceInDays } from 'date-fns'
+import { parseISO, format, differenceInDays } from 'date-fns'
 import { nl } from 'date-fns/locale'
 
 export default function ClientDetail() {
@@ -12,12 +12,8 @@ export default function ClientDetail() {
 
   const [coach, setCoach] = useState<any>(null)
   const [client, setClient] = useState<any>(null)
-  const [messages, setMessages] = useState<any[]>([])
-  const [newMessage, setNewMessage] = useState('')
-  const [sending, setSending] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'berichten' | 'trainingen' | 'programmas' | 'readiness'>('berichten')
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [activeTab, setActiveTab] = useState<'trainingen' | 'programmas' | 'readiness'>('trainingen')
 
   // Trainingen
   const [workoutHistory, setWorkoutHistory] = useState<any[]>([])
@@ -30,9 +26,10 @@ export default function ClientDetail() {
   const [workoutDetails, setWorkoutDetails] = useState<Record<string, any[]>>({})
   // Program detail expansion
   const [expandedProgram, setExpandedProgram] = useState<string | null>(null)
-  const [programDetails, setProgramDetails] = useState<Record<string, any>>({})
+  // Program performed data (actual weights per day)
+  const [programPerformedData, setProgramPerformedData] = useState<Record<string, Record<string, any[]>>>({})
   // Exercise history view (Google Sheets style)
-  const [exerciseHistoryView, setExerciseHistoryView] = useState<string | null>(null) // exercise_id
+  const [exerciseHistoryView, setExerciseHistoryView] = useState<string | null>(null)
   const [exerciseHistory, setExerciseHistory] = useState<any[]>([])
   const [exerciseHistoryName, setExerciseHistoryName] = useState('')
   // Delete state
@@ -41,11 +38,6 @@ export default function ClientDetail() {
   const [togglingId, setTogglingId] = useState<string | null>(null)
 
   useEffect(() => { load() }, [clientId])
-  useEffect(() => {
-    if (activeTab === 'berichten') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [messages, activeTab])
 
   async function load() {
     const { data: { user } } = await supabase.auth.getUser()
@@ -55,22 +47,6 @@ export default function ClientDetail() {
     const { data: clientProfile } = await supabase
       .from('profiles').select('*').eq('id', clientId).single()
     setClient(clientProfile)
-
-    // Berichten
-    const { data: msgs } = await supabase
-      .from('messages')
-      .select('*')
-      .or(`and(sender_id.eq.${user.id},receiver_id.eq.${clientId}),and(sender_id.eq.${clientId},receiver_id.eq.${user.id})`)
-      .order('sent_at', { ascending: true })
-    setMessages(msgs ?? [])
-
-    // Markeer als gelezen
-    await supabase
-      .from('messages')
-      .update({ read_at: new Date().toISOString() })
-      .eq('sender_id', clientId)
-      .eq('receiver_id', user.id)
-      .is('read_at', null)
 
     // Workout geschiedenis
     const { data: workoutLogs } = await supabase
@@ -165,14 +141,8 @@ export default function ClientDetail() {
   }
 
   async function loadWorkoutDetail(workoutLogId: string) {
-    if (expandedWorkout === workoutLogId) {
-      setExpandedWorkout(null)
-      return
-    }
-    if (workoutDetails[workoutLogId]) {
-      setExpandedWorkout(workoutLogId)
-      return
-    }
+    if (expandedWorkout === workoutLogId) { setExpandedWorkout(null); return }
+    if (workoutDetails[workoutLogId]) { setExpandedWorkout(workoutLogId); return }
     const { data: exLogs } = await supabase
       .from('exercise_logs')
       .select('*, exercises(id, name, muscle_group)')
@@ -180,7 +150,6 @@ export default function ClientDetail() {
       .order('exercise_id')
       .order('set_number', { ascending: true })
 
-    // Group by exercise
     const grouped: Record<string, { exercise: any; sets: any[] }> = {}
     exLogs?.forEach((el: any) => {
       const exId = el.exercise_id
@@ -191,16 +160,63 @@ export default function ClientDetail() {
     setExpandedWorkout(workoutLogId)
   }
 
-  // Load exercise history across all sessions (Google Sheets style)
-  async function loadExerciseHistory(exerciseId: string, exerciseName: string) {
-    if (exerciseHistoryView === exerciseId) {
-      setExerciseHistoryView(null)
+  // Load performed data for all days in a program (actual weights)
+  async function loadProgramPerformedData(programId: string) {
+    if (programPerformedData[programId]) return // already loaded
+
+    // Get all workout_logs for this program
+    const { data: wLogs } = await supabase
+      .from('workout_logs')
+      .select('id, day_id, logged_at')
+      .eq('program_id', programId)
+      .eq('client_id', clientId)
+      .not('completed_at', 'is', null)
+      .order('logged_at', { ascending: false })
+
+    if (!wLogs || wLogs.length === 0) {
+      setProgramPerformedData(prev => ({ ...prev, [programId]: {} }))
       return
     }
+
+    const wLogIds = wLogs.map(w => w.id)
+    const dayLogMap: Record<string, string> = {} // day_id -> latest workout_log_id
+    const logDateMap: Record<string, string> = {} // workout_log_id -> logged_at
+    wLogs.forEach(w => {
+      if (w.day_id && !dayLogMap[w.day_id]) dayLogMap[w.day_id] = w.id // latest first
+      logDateMap[w.id] = w.logged_at
+    })
+
+    // Get all exercise_logs for these workouts
+    const { data: eLogs } = await supabase
+      .from('exercise_logs')
+      .select('workout_log_id, exercise_id, set_number, weight_kg, reps_completed, rpe')
+      .in('workout_log_id', wLogIds)
+      .order('set_number', { ascending: true })
+
+    // Group by day_id -> exercise_id -> sets
+    const byDay: Record<string, any[]> = {}
+    const logToDayMap: Record<string, string> = {}
+    wLogs.forEach(w => { if (w.day_id) logToDayMap[w.id] = w.day_id })
+
+    eLogs?.forEach((el: any) => {
+      const dayId = logToDayMap[el.workout_log_id]
+      if (!dayId) return
+      if (!byDay[dayId]) byDay[dayId] = []
+      byDay[dayId].push({
+        ...el,
+        logged_at: logDateMap[el.workout_log_id],
+      })
+    })
+
+    setProgramPerformedData(prev => ({ ...prev, [programId]: byDay }))
+  }
+
+  // Load exercise history across all sessions (Google Sheets style)
+  async function loadExerciseHistory(exerciseId: string, exerciseName: string) {
+    if (exerciseHistoryView === exerciseId) { setExerciseHistoryView(null); return }
     setExerciseHistoryName(exerciseName)
     setExerciseHistoryView(exerciseId)
 
-    // Get all completed workout logs for this client
     const { data: wLogs } = await supabase
       .from('workout_logs')
       .select('id, logged_at')
@@ -221,7 +237,6 @@ export default function ClientDetail() {
       .in('workout_log_id', wLogIds)
       .order('set_number', { ascending: true })
 
-    // Group by date
     const byDate: Record<string, { date: string; sets: any[] }> = {}
     eLogs?.forEach((el: any) => {
       const date = dateMap[el.workout_log_id]?.split('T')[0] ?? 'unknown'
@@ -229,20 +244,32 @@ export default function ClientDetail() {
       byDate[date].sets.push(el)
     })
 
-    setExerciseHistory(
-      Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date))
-    )
+    setExerciseHistory(Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)))
   }
 
   async function deleteProgram(programId: string) {
     const prog = programs.find(p => p.id === programId)
     const hasWorkouts = (prog?.completedWorkouts ?? 0) > 0
     const msg = hasWorkouts
-      ? `Dit programma heeft ${prog.completedWorkouts} afgeronde workouts. Alle trainingsdata gaat verloren. Weet je het zeker?`
+      ? `Dit programma heeft ${prog.completedWorkouts} afgeronde workouts. Trainingsdata wordt losgekoppeld. Weet je het zeker?`
       : 'Weet je zeker dat je dit programma wilt verwijderen?'
     if (!confirm(msg)) return
 
     setDeletingId(programId)
+
+    // First: unlink workout_logs from this program (SET NULL) to avoid FK constraint
+    const { error: unlinkError } = await supabase
+      .from('workout_logs')
+      .update({ program_id: null })
+      .eq('program_id', programId)
+
+    if (unlinkError) {
+      alert(`Kon workout logs niet loskoppelen: ${unlinkError.message}`)
+      setDeletingId(null)
+      return
+    }
+
+    // Now delete the program (cascades to weeks -> days -> exercises)
     const { error } = await supabase.from('programs').delete().eq('id', programId)
     if (error) {
       alert(`Kon programma niet verwijderen: ${error.message}`)
@@ -257,7 +284,6 @@ export default function ClientDetail() {
     setTogglingId(programId)
 
     if (!currentlyActive) {
-      // Activating: deactivate all other programs first
       await supabase
         .from('programs')
         .update({ is_active: false })
@@ -278,22 +304,10 @@ export default function ClientDetail() {
 
     setPrograms(prev => prev.map(p => {
       if (p.id === programId) return { ...p, is_active: !currentlyActive }
-      if (!currentlyActive) return { ...p, is_active: false } // deactivate others
+      if (!currentlyActive) return { ...p, is_active: false }
       return p
     }))
     setTogglingId(null)
-  }
-
-  async function sendMessage() {
-    if (!newMessage.trim() || !coach) return
-    setSending(true)
-    const { data } = await supabase
-      .from('messages')
-      .insert({ sender_id: coach.id, receiver_id: clientId, content: newMessage.trim() })
-      .select().single()
-    if (data) setMessages(prev => [...prev, data])
-    setNewMessage('')
-    setSending(false)
   }
 
   if (loading) return (
@@ -327,13 +341,12 @@ export default function ClientDetail() {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs — 3 tabs without chat */}
       <div className="flex bg-zinc-900 border-b border-zinc-800 flex-shrink-0">
         {[
-          { key: 'berichten', label: '💬 Chat' },
-          { key: 'trainingen', label: `🏋️ Log` },
-          { key: 'readiness', label: '📊 Readiness' },
+          { key: 'trainingen', label: `🏋️ Trainingen` },
           { key: 'programmas', label: `📋 Programma's` },
+          { key: 'readiness', label: '📊 Readiness' },
         ].map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
             className={`flex-1 py-3 text-xs font-semibold border-b-2 transition ${
@@ -344,59 +357,11 @@ export default function ClientDetail() {
         ))}
       </div>
 
-      {/* BERICHTEN TAB */}
-      {activeTab === 'berichten' && (
-        <>
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-            {messages.length === 0 && (
-              <div className="text-center py-12">
-                <p className="text-4xl mb-3">💬</p>
-                <p className="text-zinc-500 text-sm">Nog geen berichten</p>
-              </div>
-            )}
-            {messages.map(msg => {
-              const isCoach = msg.sender_id === coach?.id
-              const timestamp = msg.sent_at || msg.created_at
-              return (
-                <div key={msg.id} className={`flex ${isCoach ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] px-4 py-3 rounded-2xl ${
-                    isCoach ? 'bg-orange-500 text-white rounded-br-sm' : 'bg-zinc-800 text-white rounded-bl-sm'
-                  }`}>
-                    <p className="text-sm">{msg.content}</p>
-                    {timestamp && (
-                      <p className={`text-xs mt-1 ${isCoach ? 'text-orange-200' : 'text-zinc-500'}`}>
-                        {formatDistanceToNow(parseISO(timestamp), { addSuffix: true, locale: nl })}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-            <div ref={messagesEndRef} />
-          </div>
-          <div className="bg-zinc-900 border-t border-zinc-800 px-4 py-3 flex-shrink-0">
-            <div className="flex gap-2">
-              <input type="text" value={newMessage}
-                onChange={e => setNewMessage(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-                placeholder={`Bericht aan ${client?.full_name?.split(' ')[0]}...`}
-                className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3
-                           text-white text-sm placeholder:text-zinc-500 focus:outline-none focus:border-orange-500" />
-              <button onClick={sendMessage} disabled={sending || !newMessage.trim()}
-                className="bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white
-                           font-bold px-4 rounded-xl text-sm transition">
-                {sending ? '...' : '→'}
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-
       {/* TRAININGEN TAB */}
       {activeTab === 'trainingen' && (
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
 
-          {/* Exercise History Modal (Google Sheets style) */}
+          {/* Exercise History Panel (Google Sheets style) */}
           {exerciseHistoryView && (
             <div className="bg-zinc-900 border-2 border-orange-500/40 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
@@ -439,12 +404,8 @@ export default function ClientDetail() {
                                   set.rpe >= 9.5 ? 'bg-red-500/20 text-red-400' :
                                   set.rpe >= 8 ? 'bg-orange-500/20 text-orange-400' :
                                   'bg-green-500/20 text-green-400'
-                                }`}>
-                                  {set.rpe}
-                                </span>
-                              ) : (
-                                <span className="text-zinc-700">–</span>
-                              )}
+                                }`}>{set.rpe}</span>
+                              ) : <span className="text-zinc-700">–</span>}
                             </td>
                             <td className="text-right text-zinc-600 py-1.5 pl-2">
                               {((set.weight_kg ?? 0) * (set.reps_completed ?? 0))} kg
@@ -457,14 +418,11 @@ export default function ClientDetail() {
                 </div>
               )}
 
-              {/* Summary row */}
               {exerciseHistory.length > 0 && (() => {
                 const allSets = exerciseHistory.flatMap(d => d.sets)
                 const maxWeight = Math.max(...allSets.map((s: any) => s.weight_kg ?? 0))
-                const lastDay = exerciseHistory[exerciseHistory.length - 1]
-                const firstDay = exerciseHistory[0]
-                const firstWeight = firstDay.sets[0]?.weight_kg ?? 0
-                const lastWeight = lastDay.sets[0]?.weight_kg ?? 0
+                const firstWeight = exerciseHistory[0].sets[0]?.weight_kg ?? 0
+                const lastWeight = exerciseHistory[exerciseHistory.length - 1].sets[0]?.weight_kg ?? 0
                 const progression = firstWeight > 0 ? lastWeight - firstWeight : 0
                 return (
                   <div className="flex gap-3 pt-2 border-t border-zinc-800">
@@ -509,8 +467,7 @@ export default function ClientDetail() {
               <p className="text-white text-sm font-black">
                 {workoutHistory[0]?.logged_at
                   ? `${differenceInDays(new Date(), parseISO(workoutHistory[0].logged_at))}d geleden`
-                  : '–'
-                }
+                  : '–'}
               </p>
             </div>
           </div>
@@ -525,19 +482,13 @@ export default function ClientDetail() {
               <div className="divide-y divide-zinc-800">
                 {workoutHistory.map(log => (
                   <div key={log.id}>
-                    <button
-                      onClick={() => loadWorkoutDetail(log.id)}
-                      className="w-full px-4 py-3 text-left hover:bg-zinc-800/50 transition"
-                    >
+                    <button onClick={() => loadWorkoutDetail(log.id)}
+                      className="w-full px-4 py-3 text-left hover:bg-zinc-800/50 transition">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
-                            <p className="text-white font-bold text-sm">
-                              {log.program_days?.label ?? 'Workout'}
-                            </p>
-                            {log.feeling && (
-                              <span className="text-base">{feelingEmoji[log.feeling]}</span>
-                            )}
+                            <p className="text-white font-bold text-sm">{log.program_days?.label ?? 'Workout'}</p>
+                            {log.feeling && <span className="text-base">{feelingEmoji[log.feeling]}</span>}
                           </div>
                           <p className="text-zinc-500 text-xs mt-0.5">
                             {format(parseISO(log.logged_at), 'EEE d MMM yyyy', { locale: nl })}
@@ -558,7 +509,6 @@ export default function ClientDetail() {
                       </div>
                     </button>
 
-                    {/* Expanded: per-exercise detail */}
                     {expandedWorkout === log.id && workoutDetails[log.id] && (
                       <div className="px-4 pb-3 space-y-2">
                         {workoutDetails[log.id].map((group: any, gi: number) => (
@@ -571,14 +521,9 @@ export default function ClientDetail() {
                                   <span className="text-zinc-500 text-[10px]">{group.exercise.muscle_group}</span>
                                 )}
                               </div>
-                              {/* View history button */}
                               <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  loadExerciseHistory(group.exercise?.id, group.exercise?.name ?? 'Oefening')
-                                }}
-                                className="text-[10px] text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded hover:bg-orange-500/20 transition"
-                              >
+                                onClick={(e) => { e.stopPropagation(); loadExerciseHistory(group.exercise?.id, group.exercise?.name ?? 'Oefening') }}
+                                className="text-[10px] text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded hover:bg-orange-500/20 transition">
                                 📊 Historie
                               </button>
                             </div>
@@ -593,9 +538,7 @@ export default function ClientDetail() {
                                       set.rpe >= 9.5 ? 'bg-red-500/20 text-red-400' :
                                       set.rpe >= 8 ? 'bg-orange-500/20 text-orange-400' :
                                       'bg-green-500/20 text-green-400'
-                                    }`}>
-                                      RPE {set.rpe}
-                                    </span>
+                                    }`}>RPE {set.rpe}</span>
                                   )}
                                   <span className="text-zinc-700 text-[10px] ml-auto">
                                     {((set.weight_kg ?? 0) * (set.reps_completed ?? 0))} kg vol.
@@ -626,7 +569,6 @@ export default function ClientDetail() {
             </div>
           ) : (
             <>
-              {/* Score trend */}
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
                 <p className="text-white font-bold text-sm mb-3">Readiness trend (14 dagen)</p>
                 <div className="flex items-end gap-1 h-20">
@@ -635,12 +577,9 @@ export default function ClientDetail() {
                     const h = (score / 5) * 100
                     return (
                       <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                        <div
-                          className={`w-full rounded-t ${
-                            score >= 4 ? 'bg-green-500' : score >= 3 ? 'bg-yellow-500' : score >= 2 ? 'bg-orange-500' : 'bg-red-500'
-                          }`}
-                          style={{ height: `${h}%`, minHeight: score > 0 ? '4px' : '0' }}
-                        />
+                        <div className={`w-full rounded-t ${
+                          score >= 4 ? 'bg-green-500' : score >= 3 ? 'bg-yellow-500' : score >= 2 ? 'bg-orange-500' : 'bg-red-500'
+                        }`} style={{ height: `${h}%`, minHeight: score > 0 ? '4px' : '0' }} />
                       </div>
                     )
                   })}
@@ -655,7 +594,6 @@ export default function ClientDetail() {
                 </div>
               </div>
 
-              {/* Daily entries */}
               <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
                 <div className="divide-y divide-zinc-800">
                   {readinessHistory.map((r: any) => (
@@ -668,40 +606,16 @@ export default function ClientDetail() {
                           (r.readiness_score ?? 0) >= 4 ? 'text-green-400' :
                           (r.readiness_score ?? 0) >= 3 ? 'text-yellow-400' :
                           (r.readiness_score ?? 0) >= 2 ? 'text-orange-400' : 'text-red-400'
-                        }`}>
-                          {r.readiness_score?.toFixed(1) ?? '–'}/5
-                        </span>
+                        }`}>{r.readiness_score?.toFixed(1) ?? '–'}/5</span>
                       </div>
                       <div className="flex flex-wrap gap-2 text-[10px]">
-                        {r.sleep_hours && (
-                          <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
-                            💤 {r.sleep_hours}u
-                          </span>
-                        )}
-                        {r.sleep_quality && (
-                          <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
-                            Slaap: {r.sleep_quality}/5
-                          </span>
-                        )}
-                        {r.energy_level && (
-                          <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
-                            Energie: {r.energy_level}/5
-                          </span>
-                        )}
-                        {r.muscle_soreness && (
-                          <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
-                            Spierpijn: {r.muscle_soreness}/5
-                          </span>
-                        )}
-                        {r.stress_level && (
-                          <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
-                            Stress: {r.stress_level}/5
-                          </span>
-                        )}
+                        {r.sleep_hours && <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">💤 {r.sleep_hours}u</span>}
+                        {r.sleep_quality && <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">Slaap: {r.sleep_quality}/5</span>}
+                        {r.energy_level && <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">Energie: {r.energy_level}/5</span>}
+                        {r.muscle_soreness && <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">Spierpijn: {r.muscle_soreness}/5</span>}
+                        {r.stress_level && <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">Stress: {r.stress_level}/5</span>}
                       </div>
-                      {r.notes && (
-                        <p className="text-zinc-600 text-xs mt-1 italic">{r.notes}</p>
-                      )}
+                      {r.notes && <p className="text-zinc-600 text-xs mt-1 italic">{r.notes}</p>}
                     </div>
                   ))}
                 </div>
@@ -714,7 +628,6 @@ export default function ClientDetail() {
       {/* PROGRAMMA'S TAB */}
       {activeTab === 'programmas' && (
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-
           {programs.length === 0 ? (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center">
               <div className="text-4xl mb-3">📋</div>
@@ -724,14 +637,13 @@ export default function ClientDetail() {
             programs.map(prog => {
               const isExpanded = expandedProgram === prog.id
               const progressPct = prog.totalDays > 0
-                ? Math.round((prog.completedWorkouts / prog.totalDays) * 100)
-                : 0
+                ? Math.round((prog.completedWorkouts / prog.totalDays) * 100) : 0
+              const performedData = programPerformedData[prog.id] ?? {}
 
               return (
                 <div key={prog.id} className={`bg-zinc-900 border rounded-2xl overflow-hidden ${
                   prog.is_active ? 'border-orange-500/40' : 'border-zinc-800'
                 }`}>
-                  {/* Program header */}
                   <div className="p-4">
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1">
@@ -739,41 +651,29 @@ export default function ClientDetail() {
                           <span className="text-xl">{goalEmoji[prog.goal] ?? '📋'}</span>
                           <p className="text-white font-bold">{prog.name}</p>
                           {prog.is_active ? (
-                            <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-bold">
-                              Actief
-                            </span>
+                            <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-bold">Actief</span>
                           ) : (
-                            <span className="text-[10px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-full font-bold">
-                              Inactief
-                            </span>
+                            <span className="text-[10px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-full font-bold">Inactief</span>
                           )}
                         </div>
                         <p className="text-zinc-500 text-xs mt-0.5">
-                          {prog.start_date
-                            ? format(parseISO(prog.start_date), 'd MMMM yyyy', { locale: nl })
-                            : '–'
-                          } · {goalLabel[prog.goal] ?? prog.goal}
+                          {prog.start_date ? format(parseISO(prog.start_date), 'd MMMM yyyy', { locale: nl }) : '–'}
+                          {' · '}{goalLabel[prog.goal] ?? prog.goal}
                         </p>
                       </div>
                     </div>
 
-                    {/* Progress bar */}
                     <div className="mb-3">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-zinc-500 text-[10px]">
-                          {prog.completedWorkouts}/{prog.totalDays} trainingen
-                        </span>
+                        <span className="text-zinc-500 text-[10px]">{prog.completedWorkouts}/{prog.totalDays} trainingen</span>
                         <span className="text-zinc-500 text-[10px] font-bold">{progressPct}%</span>
                       </div>
                       <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${prog.is_active ? 'bg-orange-500' : 'bg-zinc-600'}`}
-                          style={{ width: `${Math.min(progressPct, 100)}%` }}
-                        />
+                        <div className={`h-full rounded-full transition-all ${prog.is_active ? 'bg-orange-500' : 'bg-zinc-600'}`}
+                          style={{ width: `${Math.min(progressPct, 100)}%` }} />
                       </div>
                     </div>
 
-                    {/* Info badges */}
                     <div className="flex gap-2 flex-wrap mb-3">
                       <span className="text-xs bg-zinc-800 text-zinc-400 px-2 py-1 rounded-lg">
                         {prog.numWeeks} {prog.numWeeks === 1 ? 'week' : 'weken'}
@@ -783,14 +683,16 @@ export default function ClientDetail() {
                       </span>
                     </div>
 
-                    {/* Action buttons */}
                     <div className="flex gap-2">
                       <button
-                        onClick={() => setExpandedProgram(isExpanded ? null : prog.id)}
+                        onClick={() => {
+                          const newId = isExpanded ? null : prog.id
+                          setExpandedProgram(newId)
+                          if (newId) loadProgramPerformedData(prog.id)
+                        }}
                         className="flex-1 text-xs text-white bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2
-                                   hover:bg-zinc-700 transition font-semibold"
-                      >
-                        {isExpanded ? '▲ Inklappen' : '▼ Bekijk structuur'}
+                                   hover:bg-zinc-700 transition font-semibold">
+                        {isExpanded ? '▲ Inklappen' : '▼ Bekijk details'}
                       </button>
                       <button
                         onClick={() => toggleProgramActive(prog.id, prog.is_active)}
@@ -799,22 +701,20 @@ export default function ClientDetail() {
                           prog.is_active
                             ? 'text-zinc-400 bg-zinc-800 border border-zinc-700 hover:bg-zinc-700'
                             : 'text-orange-400 bg-orange-500/10 border border-orange-500/20 hover:bg-orange-500/20'
-                        }`}
-                      >
+                        }`}>
                         {togglingId === prog.id ? '...' : prog.is_active ? 'Deactiveer' : 'Activeer'}
                       </button>
                       <button
                         onClick={() => deleteProgram(prog.id)}
                         disabled={deletingId === prog.id}
                         className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2
-                                   hover:bg-red-500/20 transition font-semibold"
-                      >
+                                   hover:bg-red-500/20 transition font-semibold">
                         {deletingId === prog.id ? '...' : '🗑'}
                       </button>
                     </div>
                   </div>
 
-                  {/* Expanded: full program structure */}
+                  {/* Expanded: program structure with performed weights */}
                   {isExpanded && prog.program_weeks && (
                     <div className="border-t border-zinc-800 px-4 pb-4 pt-3 space-y-3">
                       {prog.program_weeks.map((week: any) => {
@@ -824,41 +724,78 @@ export default function ClientDetail() {
                             <p className="text-zinc-500 text-xs font-bold uppercase tracking-wider mb-2">
                               {week.label || `Week ${week.week_number}`}
                             </p>
-                            <div className="space-y-1.5">
+                            <div className="space-y-2">
                               {days.map((day: any) => {
                                 const exercises = day.program_exercises
                                   ?.sort((a: any, b: any) => a.order_index - b.order_index) ?? []
                                 const isDone = prog.completedDays?.has(day.id)
+                                const dayPerformed = performedData[day.id] ?? []
+
+                                // Group performed data by exercise_id
+                                const performedByExercise: Record<string, any[]> = {}
+                                dayPerformed.forEach((el: any) => {
+                                  if (!performedByExercise[el.exercise_id]) performedByExercise[el.exercise_id] = []
+                                  performedByExercise[el.exercise_id].push(el)
+                                })
+
                                 return (
                                   <div key={day.id}
-                                    className={`rounded-lg p-2.5 ${
+                                    className={`rounded-lg p-3 ${
                                       isDone ? 'bg-green-500/5 border border-green-500/20' : 'bg-zinc-800/50'
-                                    }`}
-                                  >
-                                    <div className="flex items-center gap-2 mb-1">
+                                    }`}>
+                                    <div className="flex items-center gap-2 mb-2">
                                       {isDone && <span className="text-green-400 text-xs">✓</span>}
                                       <span className="text-white text-xs font-bold">{day.label}</span>
                                       {day.rest_day && <span className="text-zinc-600 text-xs">😴 Rust</span>}
                                     </div>
+
                                     {!day.rest_day && exercises.length > 0 && (
-                                      <div className="space-y-0.5">
-                                        {exercises.map((pe: any, ei: number) => (
-                                          <div key={pe.id} className="flex items-center gap-2 text-[11px]">
-                                            <span className="text-zinc-600 w-4">{ei + 1}.</span>
-                                            <button
-                                              onClick={() => loadExerciseHistory(pe.exercise_id, pe.exercises?.name ?? 'Oefening')}
-                                              className="text-zinc-300 hover:text-orange-400 transition truncate flex-1 text-left"
-                                            >
-                                              {pe.exercises?.name ?? 'Oefening'}
-                                            </button>
-                                            <span className="text-zinc-500 flex-shrink-0">
-                                              {pe.sets}×{pe.reps}{pe.weight_kg ? ` · ${pe.weight_kg}kg` : ''}
-                                            </span>
-                                            <span className="text-zinc-700 flex-shrink-0 text-[10px]">
-                                              {pe.exercises?.muscle_group ?? ''}
-                                            </span>
-                                          </div>
-                                        ))}
+                                      <div className="space-y-2">
+                                        {exercises.map((pe: any, ei: number) => {
+                                          const performed = performedByExercise[pe.exercise_id]
+                                          return (
+                                            <div key={pe.id} className="bg-zinc-900/50 rounded-lg p-2">
+                                              <div className="flex items-center justify-between mb-1">
+                                                <div className="flex items-center gap-2">
+                                                  <span className="text-zinc-600 text-[10px] font-bold">{ei + 1}.</span>
+                                                  <button
+                                                    onClick={() => loadExerciseHistory(pe.exercise_id, pe.exercises?.name ?? 'Oefening')}
+                                                    className="text-zinc-300 hover:text-orange-400 transition text-xs font-semibold text-left">
+                                                    {pe.exercises?.name ?? 'Oefening'}
+                                                  </button>
+                                                  <span className="text-zinc-700 text-[10px]">{pe.exercises?.muscle_group ?? ''}</span>
+                                                </div>
+                                                <span className="text-zinc-600 text-[10px]">
+                                                  Plan: {pe.sets}×{pe.reps}{pe.weight_kg ? ` · ${pe.weight_kg}kg` : ''}
+                                                </span>
+                                              </div>
+
+                                              {/* Performed sets */}
+                                              {performed && performed.length > 0 ? (
+                                                <div className="mt-1 space-y-0.5">
+                                                  {performed
+                                                    .sort((a: any, b: any) => a.set_number - b.set_number)
+                                                    .map((set: any, si: number) => (
+                                                    <div key={si} className="flex items-center gap-2 text-[11px]">
+                                                      <span className="text-zinc-700 w-5">S{set.set_number}</span>
+                                                      <span className="text-white font-bold">{set.weight_kg ?? '–'} kg</span>
+                                                      <span className="text-zinc-400">× {set.reps_completed ?? '–'}</span>
+                                                      {set.rpe && (
+                                                        <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
+                                                          set.rpe >= 9.5 ? 'bg-red-500/20 text-red-400' :
+                                                          set.rpe >= 8 ? 'bg-orange-500/20 text-orange-400' :
+                                                          'bg-green-500/20 text-green-400'
+                                                        }`}>RPE {set.rpe}</span>
+                                                      )}
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              ) : isDone ? (
+                                                <p className="text-zinc-700 text-[10px] mt-1 italic">Geen sets gelogd</p>
+                                              ) : null}
+                                            </div>
+                                          )
+                                        })}
                                       </div>
                                     )}
                                     {!day.rest_day && exercises.length === 0 && (
