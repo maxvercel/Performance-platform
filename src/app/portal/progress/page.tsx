@@ -20,8 +20,10 @@ import {
   WorkoutHistory,
   RunFormModal,
 } from '@/components/progress'
+import ProgressPhotos from '@/components/progress/ProgressPhotos'
+import { BodyMap } from '@/components/ui/BodyMap'
 
-type Tab = 'kracht' | 'cardio' | 'programmas'
+type Tab = 'kracht' | 'cardio' | 'programmas' | 'fotos'
 
 const DEFAULT_RUN_FORM = {
   date: format(new Date(), 'yyyy-MM-dd'),
@@ -58,6 +60,10 @@ export default function ProgressPage() {
   const [runForm, setRunForm] = useState(DEFAULT_RUN_FORM)
   const [savingRun, setSavingRun] = useState(false)
 
+  // Photos
+  const [photos, setPhotos] = useState<any[]>([])
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+
   /* ─── Data loading ─── */
 
   useEffect(() => {
@@ -71,6 +77,7 @@ export default function ProgressPage() {
       loadKrachtData(profile.id),
       loadCardioData(profile.id),
       loadPrograms(profile.id),
+      loadPhotos(profile.id),
     ])
     setLoading(false)
   }
@@ -242,6 +249,54 @@ export default function ProgressPage() {
     setRuns(prev => prev.filter(r => r.id !== id))
   }
 
+  /* ─── Photos ─── */
+
+  async function loadPhotos(userId: string) {
+    const { data } = await supabase
+      .from('progress_photos')
+      .select('*')
+      .eq('client_id', userId)
+      .order('taken_at', { ascending: false })
+    setPhotos(data ?? [])
+  }
+
+  async function uploadPhoto(file: File, category: 'front' | 'side' | 'back', notes: string) {
+    if (!profile) return
+    setUploadingPhoto(true)
+
+    const ext = file.name.split('.').pop()
+    const fileName = `${profile.id}/${Date.now()}.${ext}`
+
+    const { data: uploaded, error: uploadErr } = await supabase.storage
+      .from('progress-photos')
+      .upload(fileName, file)
+
+    if (uploadErr) {
+      setUploadingPhoto(false)
+      throw new Error('Upload mislukt: ' + uploadErr.message)
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('progress-photos')
+      .getPublicUrl(fileName)
+
+    await supabase.from('progress_photos').insert({
+      client_id: profile.id,
+      photo_url: urlData.publicUrl,
+      category,
+      taken_at: new Date().toISOString(),
+      notes: notes || null,
+    })
+
+    await loadPhotos(profile.id)
+    setUploadingPhoto(false)
+  }
+
+  async function deletePhoto(id: string) {
+    await supabase.from('progress_photos').delete().eq('id', id)
+    setPhotos(prev => prev.filter(p => p.id !== id))
+  }
+
   /* ─── Computed values ─── */
 
   const totalVolume = workoutHistory.reduce(
@@ -274,6 +329,7 @@ export default function ProgressPage() {
           {([
             { key: 'kracht', label: '💪 Kracht' },
             { key: 'cardio', label: '🏃 Cardio' },
+            { key: 'fotos', label: '📸 Foto\'s' },
             { key: 'programmas', label: "📋 Programma's" },
           ] as const).map(t => (
             <button
@@ -337,6 +393,37 @@ export default function ProgressPage() {
           )}
 
           <MuscleVolumeChart data={muscleVolume} />
+
+          {/* Body Map Visualization */}
+          {muscleVolume.length > 0 && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+              <p className="text-white font-bold mb-1 text-sm">Spiergroep overzicht</p>
+              <p className="text-zinc-500 text-xs mb-4">Getrainde spiergroepen — intensiteit op basis van volume</p>
+              <div className="flex items-center justify-center gap-6">
+                <BodyMap
+                  highlightedMuscles={muscleVolume.map(m => m.name)}
+                  volumeData={Object.fromEntries(muscleVolume.map(m => [m.name, m.volume]))}
+                  size="md"
+                />
+                <div className="space-y-2">
+                  {muscleVolume.slice(0, 5).map(({ name, volume }) => (
+                    <div key={name} className="flex items-center gap-2">
+                      <div className={`w-2.5 h-2.5 rounded-full ${
+                        name === 'Borst' ? 'bg-blue-500' :
+                        name === 'Rug' ? 'bg-purple-500' :
+                        name === 'Benen' ? 'bg-red-500' :
+                        name === 'Schouders' ? 'bg-yellow-500' :
+                        name === 'Armen' ? 'bg-orange-500' :
+                        name === 'Core' ? 'bg-green-500' :
+                        name === 'Billen' ? 'bg-pink-500' : 'bg-zinc-500'
+                      }`} />
+                      <span className="text-zinc-300 text-xs font-medium">{name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           <ExerciseProgressChart
             exercises={exercises}
@@ -445,6 +532,18 @@ export default function ProgressPage() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ===== FOTO'S ===== */}
+      {tab === 'fotos' && (
+        <div className="px-4 py-4">
+          <ProgressPhotos
+            photos={photos}
+            onUpload={uploadPhoto}
+            onDelete={deletePhoto}
+            uploading={uploadingPhoto}
+          />
         </div>
       )}
 

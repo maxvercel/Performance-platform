@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { format, parseISO } from 'date-fns'
 import { nl } from 'date-fns/locale'
 import { TempoDisplay } from './TempoDisplay'
 import { ProgressBar } from './ProgressBar'
 import { FeelingSelector } from './FeelingSelector'
+import { RestTimerOverlay } from './RestTimerOverlay'
 import { MUSCLE_GROUP_COLORS } from '@/utils/constants'
 
 type SetLog = { weight: string; reps: string; done: boolean }
@@ -80,9 +81,69 @@ export function ActiveWorkout({
 }: ActiveWorkoutProps) {
   const [showWarmup, setShowWarmup] = useState<Record<string, boolean>>({})
 
+  // Rest timer state
+  const [restTimeRemaining, setRestTimeRemaining] = useState<number | null>(null)
+  const [restIsActive, setRestIsActive] = useState(false)
+  const [restTotalSeconds, setRestTotalSeconds] = useState(90)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prevCompletedRef = useRef(completedSets)
+
+  // Auto-start rest timer when a set is completed
+  useEffect(() => {
+    if (completedSets > prevCompletedRef.current && completedSets < totalSets) {
+      // Find the rest seconds for the current exercise
+      const allPes = day.program_exercises ?? []
+      let restSec = 90
+      for (const pe of allPes) {
+        const sets = setLogs[pe.id] ?? []
+        if (sets.some(s => s.done) && !sets.every(s => s.done)) {
+          restSec = pe.rest_seconds ?? 90
+          break
+        }
+      }
+      setRestTotalSeconds(restSec)
+      setRestTimeRemaining(restSec)
+      setRestIsActive(true)
+    }
+    prevCompletedRef.current = completedSets
+  }, [completedSets, totalSets, day.program_exercises, setLogs])
+
+  // Timer countdown
+  useEffect(() => {
+    if (restIsActive && restTimeRemaining !== null) {
+      if (restTimeRemaining <= 0) {
+        setRestIsActive(false)
+        setRestTimeRemaining(null)
+        return
+      }
+      timerRef.current = setTimeout(() => setRestTimeRemaining(prev => (prev ?? 1) - 1), 1000)
+    }
+    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
+  }, [restIsActive, restTimeRemaining])
+
+  const skipTimer = () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    setRestIsActive(false)
+    setRestTimeRemaining(null)
+  }
+
+  const addTime = (seconds: number) => {
+    setRestTimeRemaining(prev => (prev ?? 0) + seconds)
+    setRestTotalSeconds(prev => prev + seconds)
+  }
+
   return (
     <div className="px-4 py-4 space-y-3">
       <ProgressBar completed={completedSets} total={totalSets} />
+
+      {/* Rest Timer Overlay */}
+      <RestTimerOverlay
+        timeRemaining={restTimeRemaining}
+        isActive={restIsActive}
+        totalSeconds={restTotalSeconds}
+        onSkip={skipTimer}
+        onAddTime={addTime}
+      />
 
       {day.program_exercises?.map((pe: any, idx: number) => {
         const prev = previousLogs[pe.exercise_id]
