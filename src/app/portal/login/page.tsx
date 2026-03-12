@@ -74,8 +74,16 @@ export default function LoginPage() {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${location.origin}/portal/auth/callback?next=/portal/reset-password`
     })
-    if (error) { setIsError(true); setMessage(error.message) }
-    else { setIsError(false); setMessage('✓ Reset link verstuurd — check je email.') }
+    if (error) {
+      console.error('Reset password error:', error)
+      setIsError(true)
+      setMessage(error.message === 'Error sending recovery email'
+        ? 'E-mail kon niet worden verstuurd. Controleer of dit adres geregistreerd is.'
+        : error.message)
+    } else {
+      setIsError(false)
+      setMessage('✓ Reset link verstuurd — check je email (ook spam).')
+    }
     setLoading(false)
   }
 
@@ -89,15 +97,7 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full border-2 border-orange-500 mb-4">
-            <span className="text-white font-black text-xl">9F</span>
-          </div>
-          <h1 className="text-4xl font-black text-white tracking-wider">
-            9to<span className="text-orange-500">Fit</span>
-          </h1>
-          <p className="text-zinc-500 text-xs mt-1 tracking-widest uppercase">
-            Performance Portal
-          </p>
+          <img src="/logo-email.png" alt="9toFit" className="mx-auto w-56 h-auto mb-2" />
         </div>
 
         {/* Tabs */}
