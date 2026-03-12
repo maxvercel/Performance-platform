@@ -257,16 +257,31 @@ export default function ClientDetail() {
 
     setDeletingId(programId)
 
-    // First: unlink workout_logs from this program (SET NULL) to avoid FK constraint
+    // Collect all day_ids from this program's weeks/days
+    const prog2 = programs.find(p => p.id === programId)
+    const allDayIds: string[] = []
+    prog2?.program_weeks?.forEach((w: any) => {
+      w.program_days?.forEach((d: any) => { allDayIds.push(d.id) })
+    })
+
+    // Unlink workout_logs: set both program_id AND day_id to null
     const { error: unlinkError } = await supabase
       .from('workout_logs')
-      .update({ program_id: null })
+      .update({ program_id: null, day_id: null })
       .eq('program_id', programId)
 
     if (unlinkError) {
       alert(`Kon workout logs niet loskoppelen: ${unlinkError.message}`)
       setDeletingId(null)
       return
+    }
+
+    // Also unlink any workout_logs that reference day_ids from this program but may have program_id=null already
+    if (allDayIds.length > 0) {
+      await supabase
+        .from('workout_logs')
+        .update({ day_id: null })
+        .in('day_id', allDayIds)
     }
 
     // Now delete the program (cascades to weeks -> days -> exercises)
