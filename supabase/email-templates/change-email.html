@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>E-mailadres wijzigen</title>
+</head>
+<body style="margin:0;padding:0;background-color:#09090b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#09090b;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#18181b;border-radius:16px;border:1px solid #27272a;overflow:hidden;">
+          <!-- Header -->
+          <tr>
+            <td style="background:#18181b;padding:36px 32px 24px;text-align:center;">
+              <img src="https://performance-platform-wheat.vercel.app/logo-email.png" alt="9toFit" width="240" height="90" style="display:block;margin:0 auto;max-width:240px;height:auto;" />
+            </td>
+          </tr>
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px;">
+              <h1 style="margin:0 0 8px;font-size:22px;font-weight:800;color:#ffffff;">E-mailadres bevestigen</h1>
+              <p style="margin:0 0 24px;font-size:15px;color:#a1a1aa;line-height:1.6;">
+                Je hebt een verzoek ingediend om je e-mailadres te wijzigen. Klik op de knop hieronder om je nieuwe e-mailadres te bevestigen.
+              </p>
+              <!-- Button -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center">
+                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;background-color:#f97316;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 40px;border-radius:12px;">
+                      Nieuw e-mailadres bevestigen
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:24px 0 0;font-size:13px;color:#71717a;line-height:1.6;">
+                Of kopieer deze link in je browser:
+              </p>
+              <p style="margin:8px 0 0;font-size:12px;color:#f97316;word-break:break-all;line-height:1.5;">
+                {{ .ConfirmationURL }}
+              </p>
+              <div style="margin-top:24px;background-color:#27272a;border-radius:10px;padding:14px 16px;">
+                <p style="margin:0;font-size:13px;color:#a1a1aa;line-height:1.5;">
+                  &#128274; Heb je dit niet aangevraagd? Neem dan contact op met je coach of wijzig direct je wachtwoord.
+                </p>
+              </div>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="padding:0 32px 32px;">
+              <div style="border-top:1px solid #27272a;padding-top:20px;">
+                <p style="margin:0;font-size:11px;color:#3f3f46;">
+                  &copy; 2026 9toFit &middot; Performance Platform
+                </p>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
