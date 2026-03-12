@@ -321,8 +321,8 @@ export default function ProgressPage() {
   if (authLoading || loading) return <PageSpinner />
 
   return (
-    <div className="min-h-screen bg-zinc-950 pb-28">
-      <PageHeader label="Progress" title="Jouw voortgang" subtitle={format(new Date(), 'EEEE d MMMM yyyy', { locale: nl })} />
+    <div className="min-h-screen bg-zinc-950 pb-24">
+      <PageHeader label="Voortgang" title="Jouw voortgang" subtitle={format(new Date(), 'EEEE d MMMM yyyy', { locale: nl })} />
 
       {/* Tab switcher */}
       <div className="px-4 pt-4">
@@ -581,7 +581,7 @@ export default function ProgressPage() {
                 <p className="text-white font-bold text-sm">Garmin Connect</p>
                 <p className="text-zinc-500 text-xs">Binnenkort beschikbaar</p>
               </div>
-              <span className="text-xs bg-zinc-800 text-zinc-500 px-2 py-1 rounded-lg">Coming soon</span>
+              <span className="text-xs bg-zinc-800 text-zinc-500 px-2 py-1 rounded-lg">Binnenkort</span>
             </div>
           </div>
 
@@ -638,7 +638,7 @@ export default function ProgressPage() {
                     easy: '🐢', tempo: '⚡', interval: '🔥', long: '🏃',
                   }
                   const typeLabel: Record<string, string> = {
-                    easy: 'Easy run', tempo: 'Tempo', interval: 'Interval', long: 'Long run',
+                    easy: 'Rustige loop', tempo: 'Tempo', interval: 'Interval', long: 'Lange duurloop',
                   }
                   return (
                     <div key={run.id} className="px-4 py-3">
@@ -675,7 +675,7 @@ export default function ProgressPage() {
                         </div>
                         <button
                           onClick={() => deleteRun(run.id)}
-                          className="text-zinc-700 hover:text-red-400 text-lg transition ml-2"
+                          className="w-9 h-9 flex items-center justify-center text-zinc-700 hover:text-red-400 text-lg transition ml-2 rounded-lg"
                           aria-label="Verwijder run"
                         >
                           ×

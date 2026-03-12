@@ -19,7 +19,10 @@ export default function HabitsPage() {
   const [logs, setLogs] = useState<Record<string, HabitLog>>({})
   const [dataLoading, setDataLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  })
 
   const loadData = useCallback(async () => {
     if (!userId) return
@@ -115,7 +118,7 @@ export default function HabitsPage() {
           {[-3, -2, -1, 0].map(offset => {
             const d = new Date()
             d.setDate(d.getDate() + offset)
-            const dateStr = d.toISOString().split('T')[0]
+            const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
             const isSelected = dateStr === selectedDate
             const isToday = offset === 0
             return (

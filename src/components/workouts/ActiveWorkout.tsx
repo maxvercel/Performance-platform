@@ -247,6 +247,8 @@ export function ActiveWorkout({
                 <div className="mb-3">
                   <button
                     onClick={() => setShowWarmup(prev => ({ ...prev, [pe.id]: !prev[pe.id] }))}
+                    aria-expanded={isWarmupOpen}
+                    aria-label={`Warm-up schema ${isWarmupOpen ? 'verbergen' : 'tonen'}`}
                     className="flex items-center gap-1.5 text-xs text-blue-400 font-bold mb-1.5 hover:text-blue-300 transition"
                   >
                     <span>{isWarmupOpen ? '▼' : '▶'}</span>

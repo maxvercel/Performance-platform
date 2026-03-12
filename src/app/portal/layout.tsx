@@ -29,13 +29,13 @@ function BottomNav() {
   }, [supabase])
 
   const tabs = [
-    { href: '/portal/dashboard', label: 'Home', icon: (
+    { href: '/portal/dashboard', label: 'Overzicht', icon: (
       <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
         <polyline points="9 22 9 12 15 12 15 22"/>
       </svg>
     )},
-    { href: '/portal/workouts', label: 'Workouts', icon: (
+    { href: '/portal/workouts', label: 'Training', icon: (
       <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <path d="M6 4v16M18 4v16M3 8h4M17 8h4M3 16h4M17 16h4"/>
       </svg>
@@ -46,7 +46,7 @@ function BottomNav() {
         <line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>
       </svg>
     )},
-    { href: '/portal/progress', label: 'Progress', icon: (
+    { href: '/portal/progress', label: 'Voortgang', icon: (
       <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
       </svg>

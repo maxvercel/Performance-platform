@@ -192,7 +192,7 @@ export default function NutritionPage() {
   if (authLoading || loading) return <PageSpinner />
 
   return (
-    <div className="min-h-screen bg-zinc-950 pb-28">
+    <div className="min-h-screen bg-zinc-950 pb-24">
       {/* Header */}
       <div className="bg-zinc-900 px-5 pt-12 pb-4 border-b border-zinc-800">
         <p className="text-orange-500 text-xs font-bold tracking-widest uppercase mb-1">Voeding</p>
@@ -204,7 +204,8 @@ export default function NutritionPage() {
         <div className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-2xl p-3">
           <button
             onClick={() => setSelectedDate(format(subDays(parseISO(selectedDate), 1), 'yyyy-MM-dd'))}
-            className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400 hover:text-white transition"
+            className="w-11 h-11 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400 hover:text-white transition"
+            aria-label="Vorige dag"
           >
             ←
           </button>
@@ -218,7 +219,8 @@ export default function NutritionPage() {
           </div>
           <button
             onClick={() => setSelectedDate(format(addDays(parseISO(selectedDate), 1), 'yyyy-MM-dd'))}
-            className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400 hover:text-white transition"
+            className="w-11 h-11 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400 hover:text-white transition"
+            aria-label="Volgende dag"
           >
             →
           </button>

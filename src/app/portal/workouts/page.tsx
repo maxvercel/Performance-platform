@@ -414,7 +414,14 @@ export default function WorkoutsPage() {
         .eq('workout_log_id', workoutLogId)
         .eq('exercise_id', pe.exercise_id)
         .eq('set_number', setIndex + 1)
-      if (delErr) console.error('exercise_logs DELETE error:', delErr)
+      if (delErr) {
+        console.error('exercise_logs DELETE error:', delErr)
+        // Revert the UI toggle on delete failure
+        setSetLogs(prev => ({
+          ...prev,
+          [peId]: prev[peId].map((s, i) => (i === setIndex ? { ...s, done: true } : s)),
+        }))
+      }
     }
   }
 
@@ -495,7 +502,7 @@ export default function WorkoutsPage() {
         ) : (
           <>
             <p className="text-orange-500 text-xs font-bold tracking-widest uppercase mb-1">
-              Workouts
+              Trainingen
             </p>
             <h1 className="text-white text-2xl font-black">
               {program?.name ?? 'Geen programma'}

@@ -215,9 +215,9 @@ export default function DashboardPage() {
         {/* Quick links */}
         <div className="grid grid-cols-4 gap-2">
           {[
-            { label: 'Workouts', icon: '🏋️', href: '/portal/workouts' },
-            { label: 'Progress', icon: '📈', href: '/portal/progress' },
-            { label: 'PRs', icon: '🏆', href: '/portal/records' },
+            { label: 'Trainingen', icon: '🏋️', href: '/portal/workouts' },
+            { label: 'Voortgang', icon: '📈', href: '/portal/progress' },
+            { label: 'Records', icon: '🏆', href: '/portal/records' },
             { label: 'Berichten', icon: '💬', href: '/portal/messages' },
           ].map(({ label, icon, href }) => (
             <button
