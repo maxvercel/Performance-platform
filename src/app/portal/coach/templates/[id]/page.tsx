@@ -225,44 +225,31 @@ export default function TemplateEditorPage() {
     setAiLoading(false)
   }
 
-  // ─── Save exercises to database ───
+  // ─── Save exercises to database (via server API to bypass RLS) ───
   async function saveExercisesToDB() {
     setSavingExercises(true)
-    let hasError = false
 
-    for (const [dayId, exercises] of Object.entries(savedExercises)) {
-      // Delete existing exercises for this day
-      await supabase
-        .from('template_exercises')
-        .delete()
-        .eq('day_id', dayId)
+    try {
+      const res = await fetch('/api/templates/save-exercises', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateId,
+          exercises: savedExercises,
+        })
+      })
 
-      // Insert new exercises
-      if (exercises.length > 0) {
-        const rows = exercises.map((ex: any, i: number) => ({
-          day_id: dayId,
-          exercise_name: ex.name,
-          sets: ex.sets ?? 3,
-          reps: ex.reps ?? '8-10',
-          weight_kg: ex.weight_kg ?? null,
-          rest_seconds: ex.rest_seconds ?? 90,
-          notes: ex.notes ?? null,
-          order_index: i,
-        }))
-        const { error } = await supabase.from('template_exercises').insert(rows)
-        if (error) {
-          console.error('Save exercises error:', error)
-          hasError = true
-        }
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        alert(`Fout bij opslaan: ${data.error || data.message || 'Onbekende fout'}`)
+      } else {
+        alert(`Template opgeslagen! (${data.savedCount} oefeningen)`)
       }
+    } catch (err: any) {
+      alert(`Fout bij opslaan: ${err.message}`)
     }
 
     setSavingExercises(false)
-    if (hasError) {
-      alert('Sommige oefeningen konden niet opgeslagen worden. Controleer je Supabase RLS policies.')
-    } else {
-      alert('Template opgeslagen!')
-    }
   }
 
   // ─── Inline exercise editing ───
@@ -310,131 +297,44 @@ export default function TemplateEditorPage() {
     })
   }
 
-  // ─── Apply template to client ───
+  // ─── Apply template to client (via server API to bypass RLS) ───
   async function applyToClient() {
     if (!selectedClient || !profile) return
 
-    // Check if there are any exercises to apply
-    const hasExercises = Object.values(savedExercises).some(exs => exs.length > 0)
-    if (!hasExercises) {
+    const hasEx = Object.values(savedExercises).some(exs => exs.length > 0)
+    if (!hasEx) {
       alert('Voeg eerst oefeningen toe aan het template voordat je het toewijst.')
       return
     }
 
     setApplying(true)
 
-    // 1. Deactivate existing programs
-    const { error: deactivateErr } = await supabase
-      .from('programs')
-      .update({ is_active: false })
-      .eq('client_id', selectedClient)
-      .eq('is_active', true)
-
-    if (deactivateErr) {
-      alert(`Kon bestaande programma's niet deactiveren: ${deactivateErr.message}`)
-      setApplying(false)
-      return
-    }
-
-    // 2. Create program
-    const { data: program, error: progErr } = await supabase
-      .from('programs')
-      .insert({
-        coach_id: profile.id,
-        client_id: selectedClient,
-        name: programName || template.name,
-        goal: template.goal,
-        start_date: startDate,
-        is_active: true,
-      })
-      .select().single()
-
-    if (progErr || !program) {
-      alert(`Kon programma niet aanmaken: ${progErr?.message ?? 'Onbekende fout'}`)
-      setApplying(false)
-      return
-    }
-
-    // 3. Create weeks, days, exercises from saved template data
-    for (const week of weeks) {
-      const { data: progWeek, error: weekErr } = await supabase
-        .from('program_weeks')
-        .insert({
-          program_id: program.id,
-          week_number: week.week_number,
-          label: week.label || `Week ${week.week_number}`,
+    try {
+      const res = await fetch('/api/templates/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateId,
+          clientId: selectedClient,
+          programName: programName || template.name,
+          startDate,
+          exercises: savedExercises,
+          weeks,
         })
-        .select().single()
+      })
 
-      if (weekErr || !progWeek) {
-        console.error('Week create error:', weekErr)
-        continue
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        alert(`Fout bij toewijzen: ${data.error || data.message || 'Onbekende fout'}`)
+      } else {
+        alert(data.message || 'Programma toegewezen!')
+        setShowApply(false)
       }
-
-      for (const day of week.template_days) {
-        const { data: progDay, error: dayErr } = await supabase
-          .from('program_days')
-          .insert({
-            week_id: progWeek.id,
-            day_number: day.day_number,
-            label: day.label,
-            rest_day: day.rest_day,
-          })
-          .select().single()
-
-        if (dayErr || !progDay || day.rest_day) continue
-
-        // Get exercises for this day
-        const dayExercises = savedExercises[day.id] ?? []
-        for (let ei = 0; ei < dayExercises.length; ei++) {
-          const ex = dayExercises[ei]
-          if (!ex.name?.trim()) continue
-
-          // Find or create exercise in DB
-          let exerciseId: string | null = null
-
-          const { data: existing } = await supabase
-            .from('exercises')
-            .select('id')
-            .ilike('name', ex.name.trim())
-            .limit(1)
-            .maybeSingle()
-
-          if (existing) {
-            exerciseId = existing.id
-          } else {
-            // Create the exercise
-            const { data: created } = await supabase
-              .from('exercises')
-              .insert({
-                name: ex.name.trim(),
-                category: 'general',
-                muscle_group: 'general',
-                is_global: true,
-              })
-              .select('id').single()
-            exerciseId = created?.id ?? null
-          }
-
-          if (exerciseId) {
-            await supabase.from('program_exercises').insert({
-              day_id: progDay.id,
-              exercise_id: exerciseId,
-              sets: ex.sets ?? 3,
-              reps: ex.reps ?? '8-10',
-              weight_kg: ex.weight_kg ?? null,
-              rest_seconds: ex.rest_seconds ?? 90,
-              notes: ex.notes ?? null,
-              order_index: ei,
-            })
-          }
-        }
-      }
+    } catch (err: any) {
+      alert(`Fout bij toewijzen: ${err.message}`)
     }
 
     setApplying(false)
-    alert('Programma toegewezen! De client kan nu beginnen.')
-    setShowApply(false)
   }
 
   // ─── Delete template ───
