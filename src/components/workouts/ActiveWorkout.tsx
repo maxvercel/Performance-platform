@@ -7,6 +7,7 @@ import { TempoDisplay } from './TempoDisplay'
 import { ProgressBar } from './ProgressBar'
 import { FeelingSelector } from './FeelingSelector'
 import { RestTimerOverlay } from './RestTimerOverlay'
+import { ExerciseIllustration } from './ExerciseIllustration'
 import { MUSCLE_GROUP_COLORS } from '@/utils/constants'
 
 type SetLog = { weight: string; reps: string; done: boolean }
@@ -199,6 +200,12 @@ export function ActiveWorkout({
               <div className="mb-3">
                 <TempoDisplay tempo={pe.tempo} />
               </div>
+
+              {/* Exercise illustration & form cues */}
+              <ExerciseIllustration
+                exerciseName={pe.exercises?.name ?? ''}
+                muscleGroup={pe.exercises?.muscle_group ?? ''}
+              />
 
               {/* Rest time */}
               {pe.rest_seconds && (

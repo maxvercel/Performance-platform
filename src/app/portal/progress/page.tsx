@@ -21,6 +21,7 @@ import {
   RunFormModal,
 } from '@/components/progress'
 import ProgressPhotos from '@/components/progress/ProgressPhotos'
+import StravaConnect from '@/components/progress/StravaConnect'
 import { BodyMap } from '@/components/ui/BodyMap'
 
 type Tab = 'kracht' | 'cardio' | 'programmas' | 'fotos'
@@ -567,33 +568,20 @@ export default function ProgressPage() {
             </div>
           </div>
 
-          {/* Integrations coming soon */}
+          {/* Strava Integration */}
+          <StravaConnect />
+
+          {/* Garmin - coming soon */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-white font-bold text-sm">Koppelingen</p>
-              <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-bold">
-                Binnenkort
-              </span>
-            </div>
-            <div className="flex gap-3">
-              <div className="flex-1 bg-zinc-800/60 rounded-xl p-3 flex items-center gap-2 opacity-50">
-                <div className="w-8 h-8 bg-[#FC4C02] rounded-lg flex items-center justify-center">
-                  <span className="text-white font-black text-xs">S</span>
-                </div>
-                <div>
-                  <p className="text-white text-xs font-bold">Strava</p>
-                  <p className="text-zinc-500 text-xs">Sync activiteiten</p>
-                </div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-[#007DC5] rounded-xl flex items-center justify-center opacity-50">
+                <span className="text-white font-black text-sm">G</span>
               </div>
-              <div className="flex-1 bg-zinc-800/60 rounded-xl p-3 flex items-center gap-2 opacity-50">
-                <div className="w-8 h-8 bg-[#007DC5] rounded-lg flex items-center justify-center">
-                  <span className="text-white font-black text-xs">G</span>
-                </div>
-                <div>
-                  <p className="text-white text-xs font-bold">Garmin</p>
-                  <p className="text-zinc-500 text-xs">Sync activiteiten</p>
-                </div>
+              <div className="flex-1">
+                <p className="text-white font-bold text-sm">Garmin Connect</p>
+                <p className="text-zinc-500 text-xs">Binnenkort beschikbaar</p>
               </div>
+              <span className="text-xs bg-zinc-800 text-zinc-500 px-2 py-1 rounded-lg">Coming soon</span>
             </div>
           </div>
 
