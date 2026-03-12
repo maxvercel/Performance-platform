@@ -1,6 +1,7 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useRestTimer } from '@/hooks/useRestTimer'
 
 type Set = {
   setNumber: number
@@ -16,7 +17,6 @@ type Props = {
 
 export default function ExerciseLogger({ programExercise, workoutLogId }: Props) {
   const supabase = createClient()
-  console.log('ExerciseLogger geladen:', programExercise.exercises?.name, programExercise.exercise_id)
   const targetSets = programExercise.sets ?? 3
 
   const [sets, setSets] = useState<Set[]>(
@@ -32,28 +32,12 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
     programExercise.exercises?.illustration_url ?? null
   )
   const [loadingIllustration, setLoadingIllustration] = useState(false)
-  const [restTimer, setRestTimer] = useState<number | null>(null)
-  const [restActive, setRestActive] = useState(false)
-  const timerRef = useRef<any>(null)
-
   const restSeconds = programExercise.rest_seconds ?? 90
+  const { timeRemaining, isActive: restActive, start: startRest, skip: skipRest } = useRestTimer()
 
   useEffect(() => {
     if (!illustrationUrl) generateIllustration()
   }, [])
-
-  useEffect(() => {
-    if (restActive && restTimer !== null) {
-      if (restTimer <= 0) {
-        setRestActive(false)
-        setRestTimer(null)
-        clearInterval(timerRef.current)
-        return
-      }
-      timerRef.current = setTimeout(() => setRestTimer(t => (t ?? 1) - 1), 1000)
-    }
-    return () => clearTimeout(timerRef.current)
-  }, [restActive, restTimer])
 
   async function generateIllustration() {
     if (loadingIllustration) return
@@ -94,15 +78,7 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
       i === index ? { ...set, done: true } : set
     ))
 
-    // Start rusttimer
-    setRestTimer(restSeconds)
-    setRestActive(true)
-  }
-
-  function skipRest() {
-    clearTimeout(timerRef.current)
-    setRestActive(false)
-    setRestTimer(null)
+    startRest(restSeconds)
   }
 
   function addSet() {
@@ -164,15 +140,15 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
       )}
 
       {/* Rusttimer overlay */}
-      {restActive && restTimer !== null && (
+      {restActive && timeRemaining !== null && (
         <div className="bg-zinc-800 border-t border-orange-500/30 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full border-2 border-orange-500 flex items-center justify-center">
-              <span className="text-orange-400 font-black text-sm">{restTimer}</span>
+              <span className="text-orange-400 font-black text-sm">{timeRemaining}</span>
             </div>
             <div>
               <p className="text-white text-xs font-bold">Rust</p>
-              <p className="text-zinc-500 text-xs">Volgende set over {restTimer}s</p>
+              <p className="text-zinc-500 text-xs">Volgende set over {timeRemaining}s</p>
             </div>
           </div>
           <button onClick={skipRest}

@@ -1,6 +1,7 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useRestTimer } from '@/hooks/useRestTimer'
 
 type Set = {
   setNumber: number
@@ -27,29 +28,14 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
     }))
   )
   const [expanded, setExpanded] = useState(true)
-  const [restTimer, setRestTimer] = useState<number | null>(null)
-  const [restActive, setRestActive] = useState(false)
-  const timerRef = useRef<any>(null)
   const restSeconds = programExercise.rest_seconds ?? 90
-
-  useEffect(() => {
-    if (restActive && restTimer !== null) {
-      if (restTimer <= 0) {
-        setRestActive(false)
-        setRestTimer(null)
-        clearTimeout(timerRef.current)
-        return
-      }
-      timerRef.current = setTimeout(() => setRestTimer(t => (t ?? 1) - 1), 1000)
-    }
-    return () => clearTimeout(timerRef.current)
-  }, [restActive, restTimer])
+  const { timeRemaining, isActive: restActive, start: startRest, skip: skipRest } = useRestTimer()
 
   async function completeSet(index: number) {
     const s = sets[index]
     if (!s.reps) return
 
-    await supabase.from('exercise_logs').insert({
+    const { error } = await supabase.from('exercise_logs').insert({
       workout_log_id: workoutLogId,
       program_exercise_id: programExercise.id,
       exercise_id: programExercise.exercise_id,
@@ -58,18 +44,16 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
       reps_completed: parseInt(s.reps),
     })
 
+    if (error) {
+      console.error('exercise_logs INSERT error:', error)
+      return
+    }
+
     setSets(prev => prev.map((set, i) =>
       i === index ? { ...set, done: true } : set
     ))
 
-    setRestTimer(restSeconds)
-    setRestActive(true)
-  }
-
-  function skipRest() {
-    clearTimeout(timerRef.current)
-    setRestActive(false)
-    setRestTimer(null)
+    startRest(restSeconds)
   }
 
   function addSet() {
@@ -95,15 +79,15 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
     }`}>
 
       {/* Rusttimer */}
-      {restActive && restTimer !== null && (
+      {restActive && timeRemaining !== null && (
         <div className="bg-zinc-800 border-b border-orange-500/30 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full border-2 border-orange-500 flex items-center justify-center">
-              <span className="text-orange-400 font-black text-sm">{restTimer}</span>
+              <span className="text-orange-400 font-black text-sm">{timeRemaining}</span>
             </div>
             <div>
               <p className="text-white text-xs font-bold">Rust</p>
-              <p className="text-zinc-500 text-xs">Volgende set over {restTimer}s</p>
+              <p className="text-zinc-500 text-xs">Volgende set over {timeRemaining}s</p>
             </div>
           </div>
           <button onClick={skipRest}

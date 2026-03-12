@@ -1,300 +1,238 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter, useParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
+import { format, startOfWeek, parseISO, differenceInDays } from 'date-fns'
+import { nl } from 'date-fns/locale'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, BarChart, Bar
+} from 'recharts'
 
-export default function TemplateEditorPage() {
+function calc1RM(weight: number, reps: number) {
+  if (reps === 1) return weight
+  return Math.round(weight * (1 + reps / 30))
+}
+
+function formatDuration(seconds: number) {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = seconds % 60
+  if (h > 0) return `${h}u ${m}m`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
+}
+
+function formatPace(secondsPerKm: number) {
+  const m = Math.floor(secondsPerKm / 60)
+  const s = Math.round(secondsPerKm % 60)
+  return `${m}:${s.toString().padStart(2, '0')} /km`
+}
+
+export default function ProgressPage() {
   const supabase = createClient()
   const router = useRouter()
-  const params = useParams()
-  const templateId = params.id as string
 
-  const [template, setTemplate] = useState<any>(null)
-  const [weeks, setWeeks] = useState<any[]>([])
-  const [allExercises, setAllExercises] = useState<any[]>([])
-  const [selectedWeek, setSelectedWeek] = useState(0)
-  const [selectedDay, setSelectedDay] = useState(0)
-  const [dayExercises, setDayExercises] = useState<Record<string, any[]>>({})
+  const [profile, setProfile] = useState<any>(null)
+  const [tab, setTab] = useState<'kracht' | 'cardio' | 'programmas'>('kracht')
   const [loading, setLoading] = useState(true)
-  const [clients, setClients] = useState<any[]>([])
 
-  const [aiPrompt, setAiPrompt] = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiResponse, setAiResponse] = useState('')
-  const [aiMode, setAiMode] = useState<'build' | 'advice'>('build')
+  // Programma geschiedenis
+  const [allPrograms, setAllPrograms] = useState<any[]>([])
 
-  const [showAssign, setShowAssign] = useState(false)
-  const [assignClient, setAssignClient] = useState('')
-  const [assignDate, setAssignDate] = useState(new Date().toISOString().split('T')[0])
-  const [assigning, setAssigning] = useState(false)
+  // Kracht
+  const [workoutHistory, setWorkoutHistory] = useState<any[]>([])
+  const [exercises, setExercises] = useState<any[]>([])
+  const [selectedExercise, setSelectedExercise] = useState<string>('')
+  const [exerciseProgress, setExerciseProgress] = useState<any[]>([])
+  const [weeklyFrequency, setWeeklyFrequency] = useState<any[]>([])
 
-  useEffect(() => {
-    async function load() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+  // Cardio
+  const [runs, setRuns] = useState<any[]>([])
+  const [showRunForm, setShowRunForm] = useState(false)
+  const [runForm, setRunForm] = useState({
+    date: format(new Date(), 'yyyy-MM-dd'),
+    distance_km: '',
+    duration_min: '',
+    duration_sec: '',
+    avg_heart_rate: '',
+    notes: '',
+    run_type: 'easy',
+  })
+  const [savingRun, setSavingRun] = useState(false)
 
-      const [
-        { data: template },
-        { data: exercises },
-        { data: relations },
-      ] = await Promise.all([
-        supabase.from('program_templates').select('*').eq('id', templateId).single(),
-        supabase.from('exercises').select('*').eq('is_global', true).order('name'),
-        supabase.from('coach_client')
-          .select('client_id')
-          .eq('coach_id', user.id)
-          .eq('active', true),
-      ])
+  useEffect(() => { load() }, [])
 
-      setTemplate(template)
-      setAllExercises(exercises ?? [])
+  async function load() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { router.push('/portal/login'); return }
+    const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+    setProfile(prof)
+    await Promise.all([loadKrachtData(user.id), loadCardioData(user.id), loadPrograms(user.id)])
+    setLoading(false)
+  }
 
-      // Haal client profielen op
-      const clientIds = relations?.map((r: any) => r.client_id) ?? []
-      const { data: clientProfiles } = await supabase
-        .from('profiles')
-        .select('*')
-        .in('id', clientIds)
-      setClients(clientProfiles ?? [])
-      
-      const { data: weeks } = await supabase
-        .from('template_weeks')
-        .select(`*, template_days(*, template_exercises(*, exercises(*)))`)
-        .eq('template_id', templateId)
-        .order('week_number')
+  async function loadKrachtData(userId: string) {
+    // Workout history via workout_logs
+    const { data: logs } = await supabase
+      .from('workout_logs')
+      .select(`
+        id, logged_at, feeling, completed_at,
+        program_days(label),
+        programs(name)
+      `)
+      .eq('client_id', userId)
+      .not('completed_at', 'is', null)
+      .order('logged_at', { ascending: false })
+      .limit(30)
 
-      if (weeks) {
-        const formatted = weeks.map(w => ({
-          ...w,
-          days: w.template_days?.sort((a: any, b: any) => a.day_number - b.day_number) ?? []
-        }))
-        setWeeks(formatted)
-
-        const exMap: Record<string, any[]> = {}
-        formatted.forEach(w => {
-          w.days.forEach((d: any) => {
-            exMap[d.id] = d.template_exercises
-              ?.sort((a: any, b: any) => a.order_index - b.order_index) ?? []
-          })
-        })
-        setDayExercises(exMap)
-      }
-
+    if (!logs || logs.length === 0) {
+      setWorkoutHistory([])
+      setWeeklyFrequency([])
       setLoading(false)
+      return
     }
-    load()
-  }, [])
 
-  const currentDay = weeks[selectedWeek]?.days[selectedDay]
-  const currentExercises = dayExercises[currentDay?.id] ?? []
+    // Haal exercise_logs op voor deze workout_logs
+    const logIds = logs.map((l: any) => l.id)
+    const { data: exLogs } = await supabase
+      .from('exercise_logs')
+      .select('*, exercises(name, muscle_group)')
+      .in('workout_log_id', logIds)
 
-  async function addExercise(exerciseId: string) {
-    if (!currentDay) return
-    const exercise = allExercises.find(e => e.id === exerciseId)
-    if (!exercise) return
+    // Koppel exercise_logs aan workout_logs
+    const exLogsByWorkout: Record<string, any[]> = {}
+    exLogs?.forEach((el: any) => {
+      if (!exLogsByWorkout[el.workout_log_id]) exLogsByWorkout[el.workout_log_id] = []
+      exLogsByWorkout[el.workout_log_id].push(el)
+    })
 
-    const { data: te } = await supabase
-      .from('template_exercises')
-      .insert({
-        day_id: currentDay.id,
-        exercise_id: exerciseId,
-        order_index: currentExercises.length,
-        sets: 3,
-        reps: '8-12',
-        rest_seconds: 90,
-      })
-      .select().single()
+    const enrichedLogs = logs.map((log: any) => ({
+      ...log,
+      exercise_logs: exLogsByWorkout[log.id] ?? [],
+    }))
+    setWorkoutHistory(enrichedLogs)
 
-    if (te) {
-      setDayExercises(prev => ({
-        ...prev,
-        [currentDay.id]: [...(prev[currentDay.id] ?? []), { ...te, exercises: exercise }]
+    // Frequentie per week
+    const freqMap: Record<string, number> = {}
+    logs.forEach((log: any) => {
+      const weekStart = format(
+        startOfWeek(parseISO(log.logged_at), { weekStartsOn: 1 }),
+        'dd MMM', { locale: nl }
+      )
+      freqMap[weekStart] = (freqMap[weekStart] ?? 0) + 1
+    })
+    setWeeklyFrequency(Object.entries(freqMap).map(([week, count]) => ({ week, count })).reverse())
+
+    // Unieke oefeningen met logs
+    const seen = new Set()
+    const uniqueEx: any[] = []
+    exLogs?.forEach((el: any) => {
+      if (el.exercises && !seen.has(el.exercise_id)) {
+        seen.add(el.exercise_id)
+        uniqueEx.push(el.exercises)
+      }
+    })
+    setExercises(uniqueEx)
+    if (uniqueEx.length > 0) {
+      setSelectedExercise(uniqueEx[0].id)
+      await loadExerciseProgress(logIds, uniqueEx[0].id)
+    }
+  }
+
+  async function loadExerciseProgress(completedLogIds: string[], exerciseId: string) {
+    const { data: logs } = await supabase
+      .from('exercise_logs')
+      .select('*, workout_logs(logged_at)')
+      .in('workout_log_id', completedLogIds)
+      .eq('exercise_id', exerciseId)
+      .not('weight_kg', 'is', null)
+
+    // Beste set per datum
+    const byDate: Record<string, { weight: number, reps: number, date: string }> = {}
+    logs?.forEach((log: any) => {
+      if (!log.workout_logs?.logged_at) return
+      const date = format(parseISO(log.workout_logs.logged_at), 'dd MMM', { locale: nl })
+      const reps = log.reps_completed ?? 1
+      const oneRM = calc1RM(log.weight_kg, reps)
+      if (!byDate[date] || oneRM > calc1RM(byDate[date].weight, byDate[date].reps)) {
+        byDate[date] = { weight: log.weight_kg, reps, date }
+      }
+    })
+
+    setExerciseProgress(
+      Object.values(byDate).map(d => ({
+        date: d.date,
+        gewicht: d.weight,
+        '1RM': calc1RM(d.weight, d.reps),
       }))
-    }
+    )
   }
 
-  async function updateExercise(teId: string, field: string, value: any) {
-    await supabase.from('template_exercises').update({ [field]: value }).eq('id', teId)
-    setDayExercises(prev => ({
-      ...prev,
-      [currentDay.id]: prev[currentDay.id]?.map(e =>
-        e.id === teId ? { ...e, [field]: value } : e
-      ) ?? []
-    }))
-  }
-
-  async function removeExercise(teId: string) {
-    await supabase.from('template_exercises').delete().eq('id', teId)
-    setDayExercises(prev => ({
-      ...prev,
-      [currentDay.id]: prev[currentDay.id]?.filter(e => e.id !== teId) ?? []
-    }))
-  }
-
-  async function assignToClient() {
-    if (!assignClient) return
-    setAssigning(true)
-
-    const { data: program } = await supabase
+  async function loadPrograms(userId: string) {
+    const { data: programs } = await supabase
       .from('programs')
-      .insert({
-        coach_id: template.coach_id,
-        client_id: assignClient,
-        name: template.name,
-        goal: template.goal,
-        start_date: assignDate,
-        is_active: true,
-      })
-      .select().single()
+      .select(`
+        id, name, goal, start_date, is_active,
+        program_weeks(id)
+      `)
+      .eq('client_id', userId)
+      .order('start_date', { ascending: false })
 
-    if (program) {
-      for (const week of weeks) {
-        const { data: pw } = await supabase
-          .from('program_weeks')
-          .insert({ program_id: program.id, week_number: week.week_number, label: week.label })
-          .select().single()
+    if (!programs) return
 
-        if (pw) {
-          for (const day of week.days) {
-            const { data: pd } = await supabase
-              .from('program_days')
-              .insert({
-                week_id: pw.id,
-                day_number: day.day_number,
-                label: day.label,
-                rest_day: day.rest_day
-              })
-              .select().single()
+    // Haal workout counts op per programma
+    const programIds = programs.map(p => p.id)
+    const { data: workoutLogs } = await supabase
+      .from('workout_logs')
+      .select('program_id, completed_at')
+      .in('program_id', programIds)
+      .not('completed_at', 'is', null)
 
-            if (pd) {
-              const exes = dayExercises[day.id] ?? []
-              for (const ex of exes) {
-                await supabase.from('program_exercises').insert({
-                  day_id: pd.id,
-                  exercise_id: ex.exercise_id,
-                  order_index: ex.order_index,
-                  sets: ex.sets,
-                  reps: ex.reps,
-                  weight_kg: ex.weight_kg,
-                  rest_seconds: ex.rest_seconds,
-                  notes: ex.notes,
-                })
-              }
-            }
-          }
-        }
-      }
+    const workoutCountMap: Record<string, number> = {}
+    workoutLogs?.forEach((log: any) => {
+      workoutCountMap[log.program_id] = (workoutCountMap[log.program_id] ?? 0) + 1
+    })
 
-      alert('✅ Programma toegewezen aan client!')
-      setShowAssign(false)
-    }
-
-    setAssigning(false)
+    setAllPrograms(programs.map(p => ({
+      ...p,
+      numWeeks: p.program_weeks?.length ?? 0,
+      completedWorkouts: workoutCountMap[p.id] ?? 0,
+    })))
   }
 
-  async function applyAIProgram(aiProgram: any) {
-    for (const aiWeek of aiProgram.weeks) {
-      const week = weeks.find(w => w.week_number === aiWeek.week_number)
-      if (!week) continue
-
-      for (const aiDay of aiWeek.days) {
-        const day = week.days.find((d: any) => d.day_number === aiDay.day_number)
-        if (!day) continue
-
-        await supabase.from('template_days')
-          .update({ label: aiDay.label })
-          .eq('id', day.id)
-
-        await supabase.from('template_exercises').delete().eq('day_id', day.id)
-
-        for (let i = 0; i < aiDay.exercises.length; i++) {
-          const ex = aiDay.exercises[i]
-
-          const { data: found } = await supabase
-            .from('exercises')
-            .select('*')
-            .ilike('name', `%${ex.name}%`)
-            .limit(1)
-            .single()
-
-          if (found) {
-            await supabase.from('template_exercises').insert({
-              day_id: day.id,
-              exercise_id: found.id,
-              order_index: i,
-              sets: ex.sets,
-              reps: ex.reps,
-              weight_kg: ex.weight_kg,
-              rest_seconds: ex.rest_seconds,
-              notes: ex.notes,
-            })
-          }
-        }
-      }
-    }
+  async function loadCardioData(userId: string) {
+    const { data } = await supabase
+      .from('cardio_logs')
+      .select('*')
+      .eq('client_id', userId)
+      .order('logged_at', { ascending: false })
+      .limit(50)
+    setRuns(data ?? [])
   }
 
-  async function askAI() {
-    if (!aiPrompt) return
-    setAiLoading(true)
-    setAiResponse('')
+  async function saveRun() {
+    if (!profile) return
+    setSavingRun(true)
+    const totalSeconds = (parseInt(runForm.duration_min) || 0) * 60 + (parseInt(runForm.duration_sec) || 0)
+    await supabase.from('cardio_logs').insert({
+      client_id: profile.id,
+      logged_at: runForm.date,
+      distance_km: parseFloat(runForm.distance_km) || null,
+      duration_seconds: totalSeconds || null,
+      avg_heart_rate: parseInt(runForm.avg_heart_rate) || null,
+      notes: runForm.notes || null,
+      activity_type: runForm.run_type,
+    })
+    setShowRunForm(false)
+    setRunForm({ date: format(new Date(), 'yyyy-MM-dd'), distance_km: '', duration_min: '', duration_sec: '', avg_heart_rate: '', notes: '', run_type: 'easy' })
+    await loadCardioData(profile.id)
+    setSavingRun(false)
+  }
 
-    const context = weeks.map(w => ({
-      week: w.week_number,
-      days: w.days.map((d: any) => ({
-        day_number: d.day_number,
-        dag: d.label,
-        oefeningen: (dayExercises[d.id] ?? []).map(e => ({
-          naam: e.exercises?.name,
-          sets: e.sets,
-          reps: e.reps,
-          kg: e.weight_kg,
-          rust: e.rest_seconds,
-          notitie: e.notes,
-        }))
-      }))
-    }))
-
-    try {
-      const res = await fetch('/api/ai/program', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: aiPrompt,
-          program: context,
-          templateName: template.name,
-          mode: aiMode,
-        })
-      })
-
-      const data = await res.json()
-
-      if (aiMode === 'advice') {
-        setAiResponse(data.response ?? 'Geen antwoord ontvangen.')
-      } else {
-        if (data.program) {
-          await applyAIProgram(data.program)
-          setAiResponse('✅ Programma ingevuld! Pagina wordt herladen...')
-          setTimeout(() => window.location.reload(), 1500)
-        } else if (data.raw) {
-          try {
-            const clean = data.raw.replace(/```json/g, '').replace(/```/g, '').trim()
-            const parsed = JSON.parse(clean)
-            await applyAIProgram(parsed)
-            setAiResponse('✅ Programma ingevuld! Pagina wordt herladen...')
-            setTimeout(() => window.location.reload(), 1500)
-          } catch {
-            setAiResponse('❌ AI kon het programma niet correct verwerken. Probeer opnieuw.')
-          }
-        } else {
-          setAiResponse('❌ Geen programma ontvangen van AI. Probeer opnieuw.')
-        }
-      }
-    } catch {
-      setAiResponse('❌ Er ging iets mis. Probeer opnieuw.')
-    }
-
-    setAiLoading(false)
+  async function deleteRun(id: string) {
+    await supabase.from('cardio_logs').delete().eq('id', id)
+    setRuns(prev => prev.filter(r => r.id !== id))
   }
 
   if (loading) return (
@@ -303,195 +241,493 @@ export default function TemplateEditorPage() {
     </div>
   )
 
-  return (
-    <div className="min-h-screen bg-zinc-950 pb-24">
+  const totalVolume = workoutHistory.reduce((acc, log) => {
+    return acc + (log.exercise_logs?.reduce((a: number, el: any) =>
+      a + ((el.weight_kg ?? 0) * (el.reps_completed ?? 0)), 0) ?? 0)
+  }, 0)
 
-      <div className="bg-zinc-900 px-5 pt-12 pb-5 border-b border-zinc-800">
-        <button onClick={() => router.push('/portal/coach/templates')}
-          className="text-zinc-500 text-xs mb-2 flex items-center gap-1">
-          ← Terug naar templates
-        </button>
-        <h1 className="text-white text-2xl font-black">{template?.name}</h1>
-        <p className="text-zinc-500 text-xs mt-1">
-          {template?.num_weeks} weken · {template?.days_per_week} dagen/week · {template?.goal}
-        </p>
+  const bestRM = exerciseProgress.length > 0 ? Math.max(...exerciseProgress.map(e => e['1RM'])) : 0
+  const totalRunKm = runs.reduce((acc, r) => acc + (r.distance_km ?? 0), 0)
+  const paceRuns = runs.filter(r => r.distance_km && r.duration_seconds)
+  const avgRunPace = paceRuns.length > 0
+    ? paceRuns.reduce((acc, r) => acc + r.duration_seconds / r.distance_km, 0) / paceRuns.length
+    : 0
+
+  const runChartData = [...runs].reverse().map(r => ({
+    datum: format(parseISO(r.logged_at), 'dd MMM', { locale: nl }),
+    km: r.distance_km,
+  }))
+
+  return (
+    <div className="min-h-screen bg-zinc-950 pb-28">
+
+      <div className="bg-zinc-900 px-5 pt-12 pb-4 border-b border-zinc-800">
+        <p className="text-orange-500 text-xs font-bold tracking-widest uppercase mb-1">Progress</p>
+        <h1 className="text-white text-2xl font-black">Jouw voortgang</h1>
+        <p className="text-zinc-500 text-xs mt-1">{format(new Date(), 'EEEE d MMMM yyyy', { locale: nl })}</p>
       </div>
 
-      <div className="px-4 py-5 space-y-4">
-
-        <button onClick={() => setShowAssign(!showAssign)}
-          className="w-full bg-green-500 hover:bg-green-600 text-white font-black
-                     py-3 rounded-2xl text-sm transition">
-          👤 Toewijzen aan client
-        </button>
-
-        {showAssign && (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
-            <h2 className="text-white font-bold">Toewijzen aan client</h2>
-            <select value={assignClient} onChange={e => setAssignClient(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3
-                         text-white text-sm focus:outline-none focus:border-orange-500">
-              <option value="">Selecteer client</option>
-              {clients.map(c => (
-                <option key={c.id} value={c.id}>{c.full_name}</option>
-              ))}
-            </select>
-            <input type="date" value={assignDate}
-              onChange={e => setAssignDate(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3
-                         text-white text-sm focus:outline-none focus:border-orange-500
-                         [color-scheme:dark]" />
-            <button onClick={assignToClient} disabled={assigning || !assignClient}
-              className="w-full bg-green-500 disabled:opacity-40 text-white font-bold
-                         py-3 rounded-xl text-sm transition">
-              {assigning ? 'Toewijzen...' : '✓ Programma toewijzen'}
-            </button>
-          </div>
-        )}
-
-        <div className="bg-zinc-900 border border-orange-500/20 rounded-2xl p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-xl">🤖</span>
-            <h2 className="text-white font-bold">AI Programma Assistent</h2>
-          </div>
-
-          <div className="flex gap-2 mb-3">
-            {[
-              { val: 'build', label: '⚡ Direct programmeren' },
-              { val: 'advice', label: '💬 Advies vragen' },
-            ].map(m => (
-              <button key={m.val} onClick={() => setAiMode(m.val as any)}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${
-                  aiMode === m.val
-                    ? 'bg-orange-500 text-white'
-                    : 'bg-zinc-800 text-zinc-400'
-                }`}>
-                {m.label}
-              </button>
-            ))}
-          </div>
-
-          <p className="text-zinc-500 text-xs mb-3">
-            {aiMode === 'build'
-              ? 'AI vult het programma automatisch in op basis van jouw instructies'
-              : 'AI geeft advies over aanpassingen — jij voert ze zelf door'
-            }
-          </p>
-
-          <textarea
-            value={aiPrompt}
-            onChange={e => setAiPrompt(e.target.value)}
-            placeholder={aiMode === 'build'
-              ? 'bijv. Maak een upper/lower split. Dag 1 upper met bench press en rows. Dag 2 lower met squat en RDL. 4 weken progressief opbouwen.'
-              : 'bijv. Maak week 3 en 4 zwaarder met 10% meer volume...'
-            }
-            rows={4}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3
-                       text-white text-sm focus:outline-none focus:border-orange-500
-                       resize-none placeholder-zinc-600 mb-2"
-          />
-          <button onClick={askAI} disabled={aiLoading || !aiPrompt}
-            className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-40
-                       text-white font-bold py-3 rounded-xl text-sm transition">
-            {aiLoading
-              ? '🤖 Bezig...'
-              : aiMode === 'build' ? '⚡ Programma automatisch invullen' : '💬 Advies vragen'
-            }
+      <div className="px-4 pt-4">
+        <div className="flex bg-zinc-900 rounded-2xl p-1 border border-zinc-800">
+          <button onClick={() => setTab('kracht')}
+            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition ${tab === 'kracht' ? 'bg-orange-500 text-white' : 'text-zinc-400'}`}>
+            💪 Kracht
           </button>
+          <button onClick={() => setTab('cardio')}
+            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition ${tab === 'cardio' ? 'bg-orange-500 text-white' : 'text-zinc-400'}`}>
+            🏃 Cardio
+          </button>
+          <button onClick={() => setTab('programmas')}
+            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition ${tab === 'programmas' ? 'bg-orange-500 text-white' : 'text-zinc-400'}`}>
+            📋 Programma&apos;s
+          </button>
+        </div>
+      </div>
 
-          {aiResponse && (
-            <div className="mt-3 bg-zinc-800 rounded-xl p-4">
-              <p className="text-zinc-300 text-sm whitespace-pre-wrap leading-relaxed">
-                {aiResponse}
+      {/* ===== KRACHT ===== */}
+      {tab === 'kracht' && (
+        <div className="px-4 py-4 space-y-4">
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+              <p className="text-zinc-500 text-xs mb-1">Workouts (30 dgn)</p>
+              <p className="text-white text-3xl font-black">{workoutHistory.length}</p>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+              <p className="text-zinc-500 text-xs mb-1">Totaal volume</p>
+              <p className="text-white text-3xl font-black">
+                {totalVolume >= 1000 ? `${Math.round(totalVolume / 1000)}k` : Math.round(totalVolume)}
+                <span className="text-zinc-500 text-sm font-normal"> kg</span>
               </p>
             </div>
+          </div>
+
+          {weeklyFrequency.length > 0 && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+              <p className="text-white font-bold mb-1 text-sm">Workout frequentie</p>
+              <p className="text-zinc-500 text-xs mb-3">Workouts per week</p>
+              <ResponsiveContainer width="100%" height={120}>
+                <BarChart data={weeklyFrequency} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                  <XAxis dataKey="week" tick={{ fill: '#71717a', fontSize: 10 }} />
+                  <YAxis tick={{ fill: '#71717a', fontSize: 10 }} allowDecimals={false} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: 8 }}
+                    labelStyle={{ color: '#fff' }}
+                    itemStyle={{ color: '#f97316' }}
+                    formatter={(v: any) => [`${v} workouts`, '']}
+                  />
+                  <Bar dataKey="count" fill="#f97316" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           )}
-        </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-          <h2 className="text-white font-bold mb-3">Oefeningen per dag</h2>
+          {exercises.length > 0 && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+              <p className="text-white font-bold mb-1 text-sm">Progressie per oefening</p>
+              <select
+                value={selectedExercise}
+                onChange={async e => {
+                  setSelectedExercise(e.target.value)
+                  const logIds = workoutHistory.map(l => l.id)
+                  await loadExerciseProgress(logIds, e.target.value)
+                }}
+                className="w-full bg-zinc-800 text-white text-sm rounded-xl px-3 py-2 mb-3
+                           focus:outline-none focus:ring-1 focus:ring-orange-500 border border-zinc-700"
+              >
+                {exercises.map(ex => (
+                  <option key={ex.id} value={ex.id}>{ex.name}</option>
+                ))}
+              </select>
 
-          <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
-            {weeks.map((week, wi) => (
-              <button key={week.id}
-                onClick={() => { setSelectedWeek(wi); setSelectedDay(0) }}
-                className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                  selectedWeek === wi ? 'bg-orange-500 text-white' : 'bg-zinc-800 text-zinc-400'
-                }`}>
-                Week {week.week_number}
-              </button>
-            ))}
-          </div>
+              {exerciseProgress.length > 1 ? (
+                <>
+                  {bestRM > 0 && (
+                    <div className="flex items-center gap-2 mb-3 bg-yellow-500/10 rounded-xl px-3 py-2">
+                      <span>🏆</span>
+                      <span className="text-yellow-400 text-sm font-bold">Beste 1RM schatting: {bestRM} kg</span>
+                    </div>
+                  )}
+                  <ResponsiveContainer width="100%" height={160}>
+                    <LineChart data={exerciseProgress} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                      <XAxis dataKey="date" tick={{ fill: '#71717a', fontSize: 10 }} />
+                      <YAxis tick={{ fill: '#71717a', fontSize: 10 }} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: 8 }}
+                        labelStyle={{ color: '#fff' }}
+                        formatter={(v: any, name: any) => [`${v} kg`, name]}
+                      />
+                      <Line type="monotone" dataKey="gewicht" stroke="#f97316" strokeWidth={2} dot={{ fill: '#f97316', r: 3 }} name="Gewicht" />
+                      <Line type="monotone" dataKey="1RM" stroke="#facc15" strokeWidth={2} strokeDasharray="5 5" dot={{ fill: '#facc15', r: 3 }} name="1RM schatting" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                  <p className="text-zinc-600 text-xs mt-2 text-center">Oranje = gewicht · Geel gestippeld = 1RM (Epley)</p>
+                </>
+              ) : (
+                <p className="text-zinc-500 text-sm text-center py-4">Nog niet genoeg data — log meer workouts 💪</p>
+              )}
+            </div>
+          )}
 
-          <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
-            {weeks[selectedWeek]?.days.map((day: any, di: number) => (
-              <button key={day.id} onClick={() => setSelectedDay(di)}
-                className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                  selectedDay === di ? 'bg-zinc-600 text-white' : 'bg-zinc-800 text-zinc-400'
-                }`}>
-                {day.label}
-              </button>
-            ))}
-          </div>
-
-          <select
-            onChange={e => { if (e.target.value) addExercise(e.target.value); e.target.value = '' }}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3
-                       text-white text-sm focus:outline-none focus:border-orange-500 mb-3">
-            <option value="">+ Oefening toevoegen...</option>
-            {allExercises.map(ex => (
-              <option key={ex.id} value={ex.id}>{ex.name}</option>
-            ))}
-          </select>
-
-          <div className="space-y-3">
-            {currentExercises.length === 0 ? (
-              <p className="text-zinc-600 text-sm text-center py-4">
-                Nog geen oefeningen — selecteer er een hierboven of gebruik de AI
-              </p>
+          {/* Workout history */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-zinc-800">
+              <p className="text-white font-bold text-sm">Workout geschiedenis</p>
+              <p className="text-zinc-500 text-xs">Laatste 30 workouts</p>
+            </div>
+            {workoutHistory.length === 0 ? (
+              <div className="px-4 py-8 text-center">
+                <p className="text-4xl mb-2">🏋️</p>
+                <p className="text-zinc-500 text-sm">Nog geen workouts afgerond</p>
+                <p className="text-zinc-600 text-xs mt-1">Rond een workout af om hier data te zien</p>
+              </div>
             ) : (
-              currentExercises.map((te: any, idx: number) => (
-                <div key={te.id} className="bg-zinc-800 rounded-xl p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-white font-semibold text-sm">
-                      {idx + 1}. {te.exercises?.name}
-                    </p>
-                    <button onClick={() => removeExercise(te.id)}
-                      className="text-red-400 text-xs hover:text-red-300">
-                      ✕
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[
-                      { field: 'sets', label: 'Sets', val: te.sets },
-                      { field: 'reps', label: 'Reps', val: te.reps },
-                      { field: 'weight_kg', label: 'KG', val: te.weight_kg ?? '' },
-                      { field: 'rest_seconds', label: 'Rust(s)', val: te.rest_seconds },
-                    ].map(f => (
-                      <div key={f.field}>
-                        <label className="text-zinc-600 text-xs block mb-1">{f.label}</label>
-                        <input type="text" defaultValue={f.val}
-                          onBlur={e => updateExercise(te.id, f.field, e.target.value)}
-                          className="w-full bg-zinc-700 rounded-lg px-2 py-1.5 text-white
-                                     text-xs text-center focus:outline-none focus:ring-1
-                                     focus:ring-orange-500" />
+              <div className="divide-y divide-zinc-800">
+                {workoutHistory.map(log => {
+                  const setsCount = log.exercise_logs?.length ?? 0
+                  const volume = log.exercise_logs?.reduce((a: number, el: any) =>
+                    a + ((el.weight_kg ?? 0) * (el.reps_completed ?? 0)), 0) ?? 0
+                  const muscleGroups = [...new Set(
+                    log.exercise_logs?.map((el: any) => el.exercises?.muscle_group).filter(Boolean)
+                  )] as string[]
+                  const feelingEmoji = ['', '😫', '😕', '😊', '💪', '🔥'][log.feeling ?? 3]
+
+                  return (
+                    <div key={log.id} className="px-4 py-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-white font-bold text-sm">
+                              {log.program_days?.label ?? 'Workout'}
+                            </p>
+                            {log.feeling && <span className="text-base">{feelingEmoji}</span>}
+                          </div>
+                          <p className="text-zinc-500 text-xs mt-0.5">
+                            {format(parseISO(log.logged_at), 'EEEE d MMMM', { locale: nl })}
+                          </p>
+                          <div className="flex gap-3 mt-1.5">
+                            <span className="text-zinc-400 text-xs">{setsCount} sets</span>
+                            {volume > 0 && (
+                              <span className="text-zinc-400 text-xs">
+                                {volume >= 1000 ? `${Math.round(volume / 1000)}k` : Math.round(volume)} kg volume
+                              </span>
+                            )}
+                          </div>
+                          {muscleGroups.length > 0 && (
+                            <div className="flex gap-1 mt-1.5 flex-wrap">
+                              {muscleGroups.slice(0, 3).map((mg: string) => (
+                                <span key={mg} className="text-xs bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">{mg}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-zinc-600 text-xs ml-3 flex-shrink-0">{log.programs?.name}</p>
                       </div>
-                    ))}
-                  </div>
-                  <div className="mt-2">
-                    <label className="text-zinc-600 text-xs block mb-1">Coach notitie</label>
-                    <input type="text" placeholder="bijv. Focus op techniek..."
-                      defaultValue={te.notes ?? ''}
-                      onBlur={e => updateExercise(te.id, 'notes', e.target.value)}
-                      className="w-full bg-zinc-700 rounded-lg px-2 py-1.5 text-white
-                                 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500" />
-                  </div>
-                </div>
-              ))
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
         </div>
-      </div>
+      )}
+
+      {/* ===== PROGRAMMA'S ===== */}
+      {tab === 'programmas' && (
+        <div className="px-4 py-4 space-y-4">
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+              <p className="text-zinc-500 text-xs mb-1">Totaal programma&apos;s</p>
+              <p className="text-white text-3xl font-black">{allPrograms.length}</p>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+              <p className="text-zinc-500 text-xs mb-1">Totaal workouts</p>
+              <p className="text-white text-3xl font-black">
+                {allPrograms.reduce((acc, p) => acc + p.completedWorkouts, 0)}
+              </p>
+            </div>
+          </div>
+
+          {allPrograms.length === 0 ? (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center">
+              <div className="text-4xl mb-3">📋</div>
+              <p className="text-zinc-500 text-sm">Nog geen programma&apos;s gedaan</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {allPrograms.map(prog => {
+                const goalEmoji: Record<string, string> = {
+                  strength: '💪', hypertrophy: '🏋️', fat_loss: '🔥', athletic: '⚡'
+                }
+                const goalLabel: Record<string, string> = {
+                  strength: 'Kracht', hypertrophy: 'Spiermassa', fat_loss: 'Vetverlies', athletic: 'Atletisch'
+                }
+                return (
+                  <div key={prog.id} className={`bg-zinc-900 border rounded-2xl p-4 ${
+                    prog.is_active ? 'border-orange-500/40' : 'border-zinc-800'
+                  }`}>
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-white font-bold">{prog.name}</p>
+                          {prog.is_active && (
+                            <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-bold">
+                              Actief
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-zinc-500 text-xs mt-0.5">
+                          Gestart: {prog.start_date ? format(parseISO(prog.start_date), 'd MMMM yyyy', { locale: nl }) : '–'}
+                        </p>
+                      </div>
+                      <span className="text-2xl ml-2">{goalEmoji[prog.goal] ?? '📋'}</span>
+                    </div>
+                    <div className="flex gap-3 flex-wrap mt-2">
+                      <span className="text-xs bg-zinc-800 text-zinc-400 px-2 py-1 rounded-lg">
+                        {goalLabel[prog.goal] ?? prog.goal}
+                      </span>
+                      <span className="text-xs bg-zinc-800 text-zinc-400 px-2 py-1 rounded-lg">
+                        {prog.numWeeks} {prog.numWeeks === 1 ? 'week' : 'weken'}
+                      </span>
+                      <span className={`text-xs px-2 py-1 rounded-lg ${
+                        prog.completedWorkouts > 0
+                          ? 'bg-green-500/15 text-green-400'
+                          : 'bg-zinc-800 text-zinc-500'
+                      }`}>
+                        ✓ {prog.completedWorkouts} workouts gedaan
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===== CARDIO ===== */}
+      {tab === 'cardio' && (
+        <div className="px-4 py-4 space-y-4">
+
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 text-center">
+              <p className="text-zinc-500 text-xs mb-1">Runs</p>
+              <p className="text-white text-2xl font-black">{runs.length}</p>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 text-center">
+              <p className="text-zinc-500 text-xs mb-1">Totaal km</p>
+              <p className="text-white text-2xl font-black">{Math.round(totalRunKm)}</p>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 text-center">
+              <p className="text-zinc-500 text-xs mb-1">Gem. tempo</p>
+              <p className="text-white text-lg font-black">
+                {avgRunPace > 0 ? formatPace(avgRunPace) : '-'}
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-white font-bold text-sm">Koppelingen</p>
+              <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-bold">Binnenkort</span>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1 bg-zinc-800/60 rounded-xl p-3 flex items-center gap-2 opacity-50">
+                <div className="w-8 h-8 bg-[#FC4C02] rounded-lg flex items-center justify-center">
+                  <span className="text-white font-black text-xs">S</span>
+                </div>
+                <div>
+                  <p className="text-white text-xs font-bold">Strava</p>
+                  <p className="text-zinc-500 text-xs">Sync activiteiten</p>
+                </div>
+              </div>
+              <div className="flex-1 bg-zinc-800/60 rounded-xl p-3 flex items-center gap-2 opacity-50">
+                <div className="w-8 h-8 bg-[#007DC5] rounded-lg flex items-center justify-center">
+                  <span className="text-white font-black text-xs">G</span>
+                </div>
+                <div>
+                  <p className="text-white text-xs font-bold">Garmin</p>
+                  <p className="text-zinc-500 text-xs">Sync activiteiten</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {runChartData.length > 1 && (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+              <p className="text-white font-bold mb-3 text-sm">Afstand per run</p>
+              <ResponsiveContainer width="100%" height={140}>
+                <BarChart data={runChartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+                  <XAxis dataKey="datum" tick={{ fill: '#71717a', fontSize: 10 }} />
+                  <YAxis tick={{ fill: '#71717a', fontSize: 10 }} unit="km" />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: 8 }}
+                    labelStyle={{ color: '#fff' }}
+                    formatter={(v: any) => [`${v} km`, 'Afstand']}
+                  />
+                  <Bar dataKey="km" fill="#f97316" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <button onClick={() => setShowRunForm(true)}
+            className="w-full bg-orange-500 hover:bg-orange-600 text-white font-black py-4 rounded-2xl text-base transition">
+            + Run toevoegen
+          </button>
+
+          {showRunForm && (
+            <div className="fixed inset-0 bg-black/80 z-50 flex items-end justify-center">
+              <div className="bg-zinc-900 rounded-t-3xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-white font-black text-xl">Run toevoegen</h2>
+                  <button onClick={() => setShowRunForm(false)} className="text-zinc-400 text-2xl leading-none">×</button>
+                </div>
+
+                <div>
+                  <label className="text-zinc-400 text-xs font-bold block mb-2">Type</label>
+                  <div className="flex gap-2">
+                    {[
+                      { val: 'easy', label: '🐢 Easy' },
+                      { val: 'tempo', label: '⚡ Tempo' },
+                      { val: 'interval', label: '🔥 Interval' },
+                      { val: 'long', label: '🏃 Long' },
+                    ].map(t => (
+                      <button key={t.val} onClick={() => setRunForm(p => ({ ...p, run_type: t.val }))}
+                        className={`flex-1 py-2 rounded-xl text-xs font-bold transition ${
+                          runForm.run_type === t.val ? 'bg-orange-500 text-white' : 'bg-zinc-800 text-zinc-400'
+                        }`}>
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-zinc-400 text-xs font-bold block mb-2">Datum</label>
+                  <input type="date" value={runForm.date}
+                    onChange={e => setRunForm(p => ({ ...p, date: e.target.value }))}
+                    className="w-full bg-zinc-800 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500 border border-zinc-700" />
+                </div>
+
+                <div>
+                  <label className="text-zinc-400 text-xs font-bold block mb-2">Afstand (km)</label>
+                  <input type="number" step="0.01" placeholder="5.0" value={runForm.distance_km}
+                    onChange={e => setRunForm(p => ({ ...p, distance_km: e.target.value }))}
+                    className="w-full bg-zinc-800 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500 border border-zinc-700" />
+                </div>
+
+                <div>
+                  <label className="text-zinc-400 text-xs font-bold block mb-2">Tijd</label>
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <input type="number" placeholder="25" value={runForm.duration_min}
+                        onChange={e => setRunForm(p => ({ ...p, duration_min: e.target.value }))}
+                        className="w-full bg-zinc-800 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500 border border-zinc-700" />
+                      <p className="text-zinc-500 text-xs mt-1 text-center">minuten</p>
+                    </div>
+                    <div className="flex-1">
+                      <input type="number" placeholder="30" value={runForm.duration_sec}
+                        onChange={e => setRunForm(p => ({ ...p, duration_sec: e.target.value }))}
+                        className="w-full bg-zinc-800 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500 border border-zinc-700" />
+                      <p className="text-zinc-500 text-xs mt-1 text-center">seconden</p>
+                    </div>
+                  </div>
+                  {runForm.distance_km && (runForm.duration_min || runForm.duration_sec) && (
+                    <p className="text-orange-400 text-xs mt-2 text-center font-bold">
+                      Tempo: {formatPace(
+                        ((parseInt(runForm.duration_min) || 0) * 60 + (parseInt(runForm.duration_sec) || 0)) /
+                        parseFloat(runForm.distance_km)
+                      )}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-zinc-400 text-xs font-bold block mb-2">Gem. hartslag (optioneel)</label>
+                  <input type="number" placeholder="155" value={runForm.avg_heart_rate}
+                    onChange={e => setRunForm(p => ({ ...p, avg_heart_rate: e.target.value }))}
+                    className="w-full bg-zinc-800 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500 border border-zinc-700" />
+                </div>
+
+                <div>
+                  <label className="text-zinc-400 text-xs font-bold block mb-2">Notities (optioneel)</label>
+                  <textarea placeholder="Hoe voelde het?" value={runForm.notes}
+                    onChange={e => setRunForm(p => ({ ...p, notes: e.target.value }))}
+                    rows={2}
+                    className="w-full bg-zinc-800 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500 border border-zinc-700 resize-none" />
+                </div>
+
+                <button onClick={saveRun} disabled={savingRun || !runForm.distance_km}
+                  className="w-full bg-orange-500 text-white font-black py-4 rounded-2xl text-lg disabled:opacity-50 transition">
+                  {savingRun ? 'Opslaan...' : '💾 Opslaan'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-zinc-800">
+              <p className="text-white font-bold text-sm">Run geschiedenis</p>
+            </div>
+            {runs.length === 0 ? (
+              <div className="px-4 py-8 text-center">
+                <div className="text-4xl mb-2">🏃</div>
+                <p className="text-zinc-500 text-sm">Nog geen runs gelogd</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-zinc-800">
+                {runs.map(run => {
+                  const typeEmoji: Record<string, string> = { easy: '🐢', tempo: '⚡', interval: '🔥', long: '🏃' }
+                  const typeLabel: Record<string, string> = { easy: 'Easy run', tempo: 'Tempo', interval: 'Interval', long: 'Long run' }
+                  return (
+                    <div key={run.id} className="px-4 py-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center flex-shrink-0">
+                            <span className="text-xl">{typeEmoji[run.activity_type] ?? '🏃'}</span>
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-white font-bold text-sm">
+                                {run.distance_km ? `${run.distance_km} km` : typeLabel[run.activity_type]}
+                              </p>
+                              <span className="text-xs text-zinc-500">{typeLabel[run.activity_type]}</span>
+                            </div>
+                            <p className="text-zinc-500 text-xs mt-0.5">
+                              {format(parseISO(run.logged_at), 'EEEE d MMMM', { locale: nl })}
+                            </p>
+                            <div className="flex gap-3 mt-1">
+                              {run.duration_seconds && (
+                                <span className="text-zinc-400 text-xs">⏱ {formatDuration(run.duration_seconds)}</span>
+                              )}
+                              {run.distance_km && run.duration_seconds && (
+                                <span className="text-zinc-400 text-xs">
+                                  🏎 {formatPace(run.duration_seconds / run.distance_km)}
+                                </span>
+                              )}
+                              {run.avg_heart_rate && (
+                                <span className="text-zinc-400 text-xs">❤️ {run.avg_heart_rate} bpm</span>
+                              )}
+                            </div>
+                            {run.notes && <p className="text-zinc-500 text-xs mt-1 italic">{run.notes}</p>}
+                          </div>
+                        </div>
+                        <button onClick={() => deleteRun(run.id)}
+                          className="text-zinc-700 hover:text-red-400 text-lg transition ml-2">×</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

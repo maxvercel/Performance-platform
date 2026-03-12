@@ -1,14 +1,56 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { validateAIProgramRequest } from '@/lib/validation'
+
+// Simple in-memory rate limiter (per-IP, resets on server restart)
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
+const RATE_LIMIT_MAX = 10
+const RATE_LIMIT_WINDOW_MS = 60 * 1000
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now()
+  const entry = rateLimitMap.get(ip)
+
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
+    return false
+  }
+
+  entry.count++
+  return entry.count > RATE_LIMIT_MAX
+}
 
 export async function POST(request: Request) {
-  const { prompt, program, templateName, mode } = await request.json()
+  // Rate limiting
+  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
+  if (isRateLimited(ip)) {
+    return NextResponse.json(
+      { error: 'Te veel verzoeken. Probeer het over een minuut opnieuw.' },
+      { status: 429 }
+    )
+  }
+
+  // Validate request body
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Ongeldig verzoek.' }, { status: 400 })
+  }
+
+  const validation = validateAIProgramRequest(body)
+  if (!validation.valid || !validation.data) {
+    return NextResponse.json({ error: validation.error }, { status: 400 })
+  }
+
+  const { prompt, program, templateName, mode } = validation.data
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
+  // Advice mode
   if (mode !== 'build') {
     const context = JSON.stringify(program, null, 2)
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -27,16 +69,23 @@ export async function POST(request: Request) {
         }]
       })
     })
+
+    if (!response.ok) {
+      console.error('Anthropic API error (advice):', response.status)
+      return NextResponse.json({ error: 'AI service tijdelijk niet beschikbaar.' }, { status: 502 })
+    }
+
     const data = await response.json()
     return NextResponse.json({ response: data.content?.[0]?.text ?? '' })
   }
 
+  // Build mode — week by week
   const allWeeks = []
   const totalWeeks = program.length
 
   for (const week of program) {
     const numDays = week.days.length
-    const dayLabels = week.days.map((d: any) => `dag ${d.day_number}: ${d.dag}`).join(', ')
+    const dayLabels = week.days.map((d) => `dag ${d.day_number}: ${d.dag}`).join(', ')
 
     const progressie =
       week.week <= 2 ? 'Opbouwfase: RPE 6-7, 3 sets per oefening' :
@@ -72,7 +121,7 @@ Retourneer dit JSON:
 {
   "week_number": ${week.week},
   "days": [
-    ${week.days.map((d: any) => `{
+    ${week.days.map((d) => `{
       "day_number": ${d.day_number},
       "label": "${d.dag}",
       "exercises": [
@@ -89,6 +138,17 @@ Retourneer dit JSON:
       })
     })
 
+    if (!response.ok) {
+      console.error(`Anthropic API error (week ${week.week}):`, response.status)
+      allWeeks.push({
+        week_number: week.week,
+        days: week.days.map((d) => ({
+          day_number: d.day_number, label: d.dag, exercises: []
+        }))
+      })
+      continue
+    }
+
     const data = await response.json()
     const text = data.content?.[0]?.text ?? ''
 
@@ -96,19 +156,15 @@ Retourneer dit JSON:
       const clean = text.replace(/```json/g, '').replace(/```/g, '').trim()
       const parsed = JSON.parse(clean)
 
-      // Auto-voeg nieuwe oefeningen toe aan de database
+      // Auto-create new exercises in the database
       for (const day of parsed.days) {
         for (const ex of day.exercises) {
           if (!ex.name) continue
-
-          // Check of oefening al bestaat
           const { data: existing } = await supabase
             .from('exercises')
             .select('id')
             .ilike('name', ex.name.trim())
             .single()
-
-          // Zo niet — voeg toe
           if (!existing) {
             await supabase.from('exercises').insert({
               name: ex.name.trim(),
@@ -116,20 +172,17 @@ Retourneer dit JSON:
               muscle_group: 'general',
               is_global: true,
             })
-            console.log('Nieuwe oefening toegevoegd:', ex.name)
           }
         }
       }
 
       allWeeks.push(parsed)
     } catch {
-      console.error(`Week ${week.week} parse fout:`, text.substring(0, 300))
+      console.error(`Week ${week.week} parse error:`, text.substring(0, 300))
       allWeeks.push({
         week_number: week.week,
-        days: week.days.map((d: any) => ({
-          day_number: d.day_number,
-          label: d.dag,
-          exercises: []
+        days: week.days.map((d) => ({
+          day_number: d.day_number, label: d.dag, exercises: []
         }))
       })
     }

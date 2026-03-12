@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { validateRegistration } from '@/lib/validation'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -36,14 +37,11 @@ export default function LoginPage() {
   async function handleRegister() {
   setLoading(true); setMessage('')
 
-  if (!firstName || !lastName || !regEmail || !regPassword) {
-    setIsError(true); setMessage('Vul alle verplichte velden in.'); setLoading(false); return
-  }
-  if (regPassword !== regPassword2) {
-    setIsError(true); setMessage('Wachtwoorden komen niet overeen.'); setLoading(false); return
-  }
-  if (regPassword.length < 8) {
-    setIsError(true); setMessage('Wachtwoord moet minimaal 8 tekens zijn.'); setLoading(false); return
+  const validation = validateRegistration({
+    firstName, lastName, email: regEmail, password: regPassword, password2: regPassword2,
+  })
+  if (!validation.valid) {
+    setIsError(true); setMessage(validation.error!); setLoading(false); return
   }
 
   const { error } = await supabase.auth.signUp({
@@ -136,6 +134,8 @@ export default function LoginPage() {
               placeholder="Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              aria-label="Email"
+              autoComplete="email"
               className={inputClass}
             />
             <input
@@ -144,6 +144,8 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+              aria-label="Wachtwoord"
+              autoComplete="current-password"
               className={inputClass}
             />
             {message && (
