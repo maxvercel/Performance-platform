@@ -109,10 +109,28 @@ export interface ExerciseLog {
   set_number: number
   weight_kg: number | null
   reps_completed: number | null
+  rpe: number | null
   reps?: number | null
   logged_at?: string
   exercises?: Exercise
   workout_logs?: Pick<WorkoutLog, 'logged_at' | 'client_id' | 'completed_at'>
+}
+
+// ─── Daily Readiness ────────────────────────────────────────────────────
+
+export interface DailyReadiness {
+  id: string
+  client_id: string
+  date: string
+  sleep_hours: number | null
+  sleep_quality: number | null
+  energy_level: number | null
+  stress_level: number | null
+  muscle_soreness: number | null
+  motivation: number | null
+  notes: string | null
+  readiness_score: number | null
+  created_at: string
 }
 
 // ─── Progress & Metrics ──────────────────────────────────────────────────────
@@ -178,6 +196,7 @@ export interface Message {
 export interface SetLog {
   weight: string
   reps: string
+  rpe: string
   done: boolean
 }
 

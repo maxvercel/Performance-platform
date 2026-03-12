@@ -9,8 +9,9 @@ import { FeelingSelector } from './FeelingSelector'
 import { RestTimerOverlay } from './RestTimerOverlay'
 import { ExerciseIllustration } from './ExerciseIllustration'
 import { MUSCLE_GROUP_COLORS } from '@/utils/constants'
+import { getTrainingRecommendation } from '@/utils/autoAdjust'
 
-type SetLog = { weight: string; reps: string; done: boolean }
+type SetLog = { weight: string; reps: string; rpe: string; done: boolean }
 
 interface PreviousLog {
   weight_kg: number | null
@@ -33,10 +34,12 @@ interface ActiveWorkoutProps {
   totalSets: number
   feeling: number
   saving: boolean
-  onSetChange: (peId: string, setIndex: number, field: 'weight' | 'reps', value: string) => void
+  onSetChange: (peId: string, setIndex: number, field: 'weight' | 'reps' | 'rpe', value: string) => void
   onToggleSet: (peId: string, setIndex: number) => void
   onFeelingChange: (value: number) => void
   onFinish: () => void
+  readinessScore?: number | null
+  adjustmentReasons?: Record<string, string>
 }
 
 /** Generate warm-up sets based on working weight */
@@ -79,6 +82,8 @@ export function ActiveWorkout({
   onToggleSet,
   onFeelingChange,
   onFinish,
+  readinessScore,
+  adjustmentReasons = {},
 }: ActiveWorkoutProps) {
   const [showWarmup, setShowWarmup] = useState<Record<string, boolean>>({})
 
@@ -133,9 +138,38 @@ export function ActiveWorkout({
     setRestTotalSeconds(prev => prev + seconds)
   }
 
+  const recommendation = readinessScore ? getTrainingRecommendation(readinessScore) : null
+
   return (
     <div className="px-4 py-4 space-y-3">
       <ProgressBar completed={completedSets} total={totalSets} />
+
+      {/* Readiness-based training recommendation */}
+      {recommendation && readinessScore && (
+        <div className={`rounded-xl px-3 py-2.5 flex items-center gap-2.5 border ${
+          recommendation.type === 'full' ? 'bg-green-500/10 border-green-500/30' :
+          recommendation.type === 'moderate' ? 'bg-yellow-500/10 border-yellow-500/30' :
+          recommendation.type === 'light' ? 'bg-orange-500/10 border-orange-500/30' :
+          'bg-red-500/10 border-red-500/30'
+        }`}>
+          <span className="text-lg flex-shrink-0">
+            {recommendation.type === 'full' ? '🟢' :
+             recommendation.type === 'moderate' ? '🟡' :
+             recommendation.type === 'light' ? '🟠' : '🔴'}
+          </span>
+          <div>
+            <p className={`text-xs font-bold ${
+              recommendation.type === 'full' ? 'text-green-400' :
+              recommendation.type === 'moderate' ? 'text-yellow-400' :
+              recommendation.type === 'light' ? 'text-orange-400' :
+              'text-red-400'
+            }`}>
+              Readiness {readinessScore.toFixed(1)}/5 — {recommendation.label}
+            </p>
+            <p className="text-zinc-500 text-[10px] mt-0.5">{recommendation.description}</p>
+          </div>
+        </div>
+      )}
 
       {/* Rest Timer Overlay */}
       <RestTimerOverlay
@@ -242,6 +276,14 @@ export function ActiveWorkout({
                 </div>
               )}
 
+              {/* Auto-adjustment reason */}
+              {adjustmentReasons[pe.exercise_id] && (
+                <div className="mb-3 flex items-center gap-1.5 bg-blue-500/5 border border-blue-500/10 rounded-lg px-3 py-1.5">
+                  <span className="text-blue-400 text-xs">🤖</span>
+                  <span className="text-blue-300 text-xs">{adjustmentReasons[pe.exercise_id]}</span>
+                </div>
+              )}
+
               {/* Warm-up calculator */}
               {warmupSets.length > 0 && (
                 <div className="mb-3">
@@ -298,58 +340,86 @@ export function ActiveWorkout({
                   const isSuggested = hasSuggestion && currentWeight === suggestion
 
                   return (
-                    <div
-                      key={si}
-                      className={`flex items-center gap-2 p-2 rounded-xl transition ${
-                        set.done ? 'bg-green-500/10' : 'bg-zinc-800'
-                      }`}
-                    >
-                      <span className="text-zinc-500 text-xs w-6 text-center font-bold">
-                        {si + 1}
-                      </span>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          value={set.weight}
-                          onChange={e => onSetChange(pe.id, si, 'weight', e.target.value)}
-                          placeholder="kg"
-                          aria-label={`Set ${si + 1} gewicht`}
-                          className={`w-16 rounded-lg px-2 py-1.5 text-white text-xs text-center
-                                     focus:outline-none focus:ring-1 focus:ring-orange-500 ${
-                                       isSuggested
-                                         ? 'bg-orange-500/10 ring-1 ring-orange-500/30'
-                                         : 'bg-zinc-700'
-                                     }`}
-                        />
-                        {isSuggested && !set.done && (
-                          <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-orange-500 rounded-full border border-zinc-900" />
-                        )}
-                      </div>
-                      <span className="text-zinc-600 text-xs">kg</span>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        value={set.reps}
-                        onChange={e => onSetChange(pe.id, si, 'reps', e.target.value)}
-                        placeholder="reps"
-                        aria-label={`Set ${si + 1} herhalingen`}
-                        className="w-16 bg-zinc-700 rounded-lg px-2 py-1.5 text-white text-xs text-center
-                                   focus:outline-none focus:ring-1 focus:ring-orange-500"
-                      />
-                      <span className="text-zinc-600 text-xs">reps</span>
-                      <button
-                        onClick={() => onToggleSet(pe.id, si)}
-                        aria-label={set.done ? `Set ${si + 1} ongedaan maken` : `Set ${si + 1} voltooien`}
-                        className={`ml-auto w-11 h-11 rounded-xl flex items-center justify-center
-                                    transition font-bold text-sm ${
-                          set.done
-                            ? 'bg-green-500 text-white'
-                            : 'bg-zinc-700 text-zinc-500 hover:bg-orange-500 hover:text-white'
+                    <div key={si} className="space-y-1">
+                      <div
+                        className={`flex items-center gap-2 p-2 rounded-xl transition ${
+                          set.done ? 'bg-green-500/10' : 'bg-zinc-800'
                         }`}
                       >
-                        ✓
-                      </button>
+                        <span className="text-zinc-500 text-xs w-6 text-center font-bold">
+                          {si + 1}
+                        </span>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            value={set.weight}
+                            onChange={e => onSetChange(pe.id, si, 'weight', e.target.value)}
+                            placeholder="kg"
+                            aria-label={`Set ${si + 1} gewicht`}
+                            className={`w-16 rounded-lg px-2 py-1.5 text-white text-xs text-center
+                                       focus:outline-none focus:ring-1 focus:ring-orange-500 ${
+                                         isSuggested
+                                           ? 'bg-orange-500/10 ring-1 ring-orange-500/30'
+                                           : 'bg-zinc-700'
+                                       }`}
+                          />
+                          {isSuggested && !set.done && (
+                            <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-orange-500 rounded-full border border-zinc-900" />
+                          )}
+                        </div>
+                        <span className="text-zinc-600 text-xs">kg</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          value={set.reps}
+                          onChange={e => onSetChange(pe.id, si, 'reps', e.target.value)}
+                          placeholder="reps"
+                          aria-label={`Set ${si + 1} herhalingen`}
+                          className="w-16 bg-zinc-700 rounded-lg px-2 py-1.5 text-white text-xs text-center
+                                     focus:outline-none focus:ring-1 focus:ring-orange-500"
+                        />
+                        <span className="text-zinc-600 text-xs">reps</span>
+                        <button
+                          onClick={() => onToggleSet(pe.id, si)}
+                          aria-label={set.done ? `Set ${si + 1} ongedaan maken` : `Set ${si + 1} voltooien`}
+                          className={`ml-auto w-11 h-11 rounded-xl flex items-center justify-center
+                                      transition font-bold text-sm ${
+                            set.done
+                              ? 'bg-green-500 text-white'
+                              : 'bg-zinc-700 text-zinc-500 hover:bg-orange-500 hover:text-white'
+                          }`}
+                        >
+                          ✓
+                        </button>
+                      </div>
+                      {/* RPE selector — shown after set is completed */}
+                      {set.done && (
+                        <div className="flex items-center gap-1.5 ml-8">
+                          <span className="text-zinc-600 text-[10px] font-bold w-8">RPE</span>
+                          <div className="flex gap-0.5">
+                            {[6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10].map(rpeVal => {
+                              const selected = parseFloat(set.rpe) === rpeVal
+                              return (
+                                <button
+                                  key={rpeVal}
+                                  onClick={() => onSetChange(pe.id, si, 'rpe', rpeVal.toString())}
+                                  aria-label={`RPE ${rpeVal}`}
+                                  className={`h-6 rounded text-[10px] font-bold transition px-1.5 ${
+                                    selected
+                                      ? rpeVal >= 9.5 ? 'bg-red-500/30 text-red-300 border border-red-500/50'
+                                      : rpeVal >= 8 ? 'bg-orange-500/30 text-orange-300 border border-orange-500/50'
+                                      : 'bg-green-500/30 text-green-300 border border-green-500/50'
+                                      : 'bg-zinc-800 text-zinc-600 hover:bg-zinc-700'
+                                  }`}
+                                >
+                                  {rpeVal % 1 === 0 ? rpeVal : rpeVal.toFixed(1)}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )
                 })}

@@ -16,8 +16,9 @@ import {
   ActiveWorkout,
 } from '@/components/workouts'
 import { parseRepsDefault } from '@/utils/calculations'
+import { calculateAdjustedWeight, averageRpe, getTrainingRecommendation } from '@/utils/autoAdjust'
 
-type SetLog = { weight: string; reps: string; done: boolean }
+type SetLog = { weight: string; reps: string; rpe: string; done: boolean }
 
 export default function WorkoutsPage() {
   const supabase = createClient()
@@ -40,6 +41,8 @@ export default function WorkoutsPage() {
   const [completedRecap, setCompletedRecap] = useState<any>(null)
   const [loadingRecap, setLoadingRecap] = useState(false)
   const [suggestedWeights, setSuggestedWeights] = useState<Record<string, number>>({})
+  const [readinessScore, setReadinessScore] = useState<number | null>(null)
+  const [adjustmentReasons, setAdjustmentReasons] = useState<Record<string, string>>({})
 
   /* ─── Helpers ─── */
 
@@ -76,19 +79,29 @@ export default function WorkoutsPage() {
   )
 
   const initSetLogs = useCallback(
-    (day: any, prevLogs: Record<string, any>) => {
+    (day: any, prevLogs: Record<string, any>, todayReadiness: number | null = null) => {
       const initSets: Record<string, SetLog[]> = {}
       const suggestions: Record<string, number> = {}
+      const reasons: Record<string, string> = {}
 
       day.program_exercises?.forEach((pe: any) => {
         const prev = prevLogs[pe.exercise_id]
         const repsDefault = parseRepsDefault(pe.reps)
 
-        // Smart weight suggestion: previous + 2.5kg
+        // Smart weight suggestion with auto-adjustment
         if (prev?.weight_kg) {
           const prevWeight = parseFloat(prev.weight_kg)
           if (prevWeight > 0) {
-            suggestions[pe.exercise_id] = Math.round((prevWeight + 2.5) * 2) / 2 // round to 0.5
+            const lastRpe = prev?.rpe ? parseFloat(prev.rpe) : null
+            const adjustment = calculateAdjustedWeight({
+              previousWeight: prevWeight,
+              lastSessionAvgRpe: lastRpe,
+              readinessScore: todayReadiness,
+            })
+            suggestions[pe.exercise_id] = adjustment.suggestedWeight
+            if (adjustment.adjustmentPercent !== 0) {
+              reasons[pe.exercise_id] = adjustment.reason
+            }
           }
         }
 
@@ -99,11 +112,13 @@ export default function WorkoutsPage() {
         initSets[pe.id] = Array.from({ length: pe.sets ?? 3 }, () => ({
           weight: fillWeight,
           reps: prev?.reps_completed?.toString() ?? repsDefault,
+          rpe: '',
           done: false,
         }))
       })
 
       setSuggestedWeights(suggestions)
+      setAdjustmentReasons(reasons)
       return initSets
     },
     []
@@ -151,8 +166,14 @@ export default function WorkoutsPage() {
         })) ?? []
     setAllWeeks(weeks)
 
+    // Fetch today's readiness score
+    const todayStr = (() => {
+      const now = new Date()
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    })()
+
     // Parallel data fetching
-    const [completedLogsRes, activeLogRes, allUserWlRes] = await Promise.all([
+    const [completedLogsRes, activeLogRes, allUserWlRes, readinessRes] = await Promise.all([
       supabase
         .from('workout_logs')
         .select('day_id')
@@ -174,7 +195,18 @@ export default function WorkoutsPage() {
         .select('id')
         .eq('client_id', profile.id)
         .not('completed_at', 'is', null),
+      supabase
+        .from('daily_readiness')
+        .select('readiness_score')
+        .eq('client_id', profile.id)
+        .eq('date', todayStr)
+        .maybeSingle(),
     ])
+
+    // Readiness score
+    if (readinessRes.data?.readiness_score) {
+      setReadinessScore(readinessRes.data.readiness_score)
+    }
 
     // Completed days
     const doneIds = new Set<string>(
@@ -266,6 +298,7 @@ export default function WorkoutsPage() {
             loggedSet?.reps_completed?.toString() ??
             prev?.reps_completed?.toString() ??
             repsDefault,
+          rpe: loggedSet?.rpe?.toString() ?? '',
           done: !!loggedSet,
         }
       })
@@ -296,7 +329,7 @@ export default function WorkoutsPage() {
     const exerciseIds = day.program_exercises?.map((pe: any) => pe.exercise_id) ?? []
     const prevLogs = await fetchPreviousLogs(exerciseIds, profile!.id)
     setPreviousLogs(prevLogs)
-    setSetLogs(initSetLogs(day, prevLogs))
+    setSetLogs(initSetLogs(day, prevLogs, readinessScore))
   }
 
   async function loadCompletedRecap(day: any) {
@@ -363,11 +396,24 @@ export default function WorkoutsPage() {
     setSaving(false)
   }
 
-  function handleSetChange(peId: string, setIndex: number, field: 'weight' | 'reps', value: string) {
+  function handleSetChange(peId: string, setIndex: number, field: 'weight' | 'reps' | 'rpe', value: string) {
     setSetLogs(prev => ({
       ...prev,
       [peId]: prev[peId].map((s, i) => (i === setIndex ? { ...s, [field]: value } : s)),
     }))
+
+    // If changing RPE on a completed set, update the DB directly
+    if (field === 'rpe' && setLogs[peId]?.[setIndex]?.done && workoutLogId) {
+      const pe = selectedDay?.program_exercises?.find((e: any) => e.id === peId)
+      if (pe) {
+        supabase.from('exercise_logs')
+          .update({ rpe: parseFloat(value) || null })
+          .eq('workout_log_id', workoutLogId)
+          .eq('exercise_id', pe.exercise_id)
+          .eq('set_number', setIndex + 1)
+          .then(({ error }) => { if (error) console.error('RPE update error:', error) })
+      }
+    }
   }
 
   async function toggleSet(peId: string, setIndex: number) {
@@ -387,6 +433,7 @@ export default function WorkoutsPage() {
     if (newDone) {
       const weight = parseFloat(current.weight) || null
       const reps = parseInt(current.reps) || null
+      const rpe = parseFloat(current.rpe) || null
       const { error: insertErr } = await supabase.from('exercise_logs').insert({
         workout_log_id: workoutLogId,
         exercise_id: pe.exercise_id,
@@ -394,6 +441,7 @@ export default function WorkoutsPage() {
         set_number: setIndex + 1,
         weight_kg: weight,
         reps_completed: reps,
+        rpe,
       })
       if (insertErr) {
         console.error('exercise_logs INSERT error:', insertErr)
@@ -579,6 +627,8 @@ export default function WorkoutsPage() {
           onToggleSet={toggleSet}
           onFeelingChange={setFeeling}
           onFinish={finishWorkout}
+          readinessScore={readinessScore}
+          adjustmentReasons={adjustmentReasons}
         />
       )}
     </div>

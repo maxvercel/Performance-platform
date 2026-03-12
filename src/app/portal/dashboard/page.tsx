@@ -13,6 +13,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { calcPercentage } from '@/utils/calculations'
 import WeightLogger from '@/components/dashboard/WeightLogger'
 import WeightChart from '@/components/dashboard/WeightChart'
+import ReadinessCheckin from '@/components/dashboard/ReadinessCheckin'
 import type { ProgressMetric } from '@/types'
 
 export default function DashboardPage() {
@@ -26,6 +27,7 @@ export default function DashboardPage() {
   const [activeProgram, setActiveProgram] = useState<{ name: string; end_date: string | null } | null>(null)
   const [lastWorkout, setLastWorkout] = useState<string | null>(null)
   const [streak, setStreak] = useState(0)
+  const [readinessScore, setReadinessScore] = useState<number | null>(null)
 
   const loadDashboardData = useCallback(async () => {
     if (!userId) return
@@ -167,6 +169,9 @@ export default function DashboardPage() {
             )}
           </Card>
         </div>
+
+        {/* Daily Readiness Check-in */}
+        <ReadinessCheckin userId={profile?.id ?? ''} onScoreUpdate={setReadinessScore} />
 
         {/* Active program banner */}
         {activeProgram && (
