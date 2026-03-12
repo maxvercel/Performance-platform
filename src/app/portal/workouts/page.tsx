@@ -39,6 +39,7 @@ export default function WorkoutsPage() {
   const [completedDayIds, setCompletedDayIds] = useState<Set<string>>(new Set())
   const [completedRecap, setCompletedRecap] = useState<any>(null)
   const [loadingRecap, setLoadingRecap] = useState(false)
+  const [suggestedWeights, setSuggestedWeights] = useState<Record<string, number>>({})
 
   /* ─── Helpers ─── */
 
@@ -77,15 +78,32 @@ export default function WorkoutsPage() {
   const initSetLogs = useCallback(
     (day: any, prevLogs: Record<string, any>) => {
       const initSets: Record<string, SetLog[]> = {}
+      const suggestions: Record<string, number> = {}
+
       day.program_exercises?.forEach((pe: any) => {
         const prev = prevLogs[pe.exercise_id]
         const repsDefault = parseRepsDefault(pe.reps)
+
+        // Smart weight suggestion: previous + 2.5kg
+        if (prev?.weight_kg) {
+          const prevWeight = parseFloat(prev.weight_kg)
+          if (prevWeight > 0) {
+            suggestions[pe.exercise_id] = Math.round((prevWeight + 2.5) * 2) / 2 // round to 0.5
+          }
+        }
+
+        // Pre-fill sets with suggested weight (or fall back to previous)
+        const suggestedWeight = suggestions[pe.exercise_id]
+        const fillWeight = suggestedWeight?.toString() ?? prev?.weight_kg?.toString() ?? pe.weight_kg?.toString() ?? ''
+
         initSets[pe.id] = Array.from({ length: pe.sets ?? 3 }, () => ({
-          weight: prev?.weight_kg?.toString() ?? pe.weight_kg?.toString() ?? '',
+          weight: fillWeight,
           reps: prev?.reps_completed?.toString() ?? repsDefault,
           done: false,
         }))
       })
+
+      setSuggestedWeights(suggestions)
       return initSets
     },
     []
@@ -205,6 +223,19 @@ export default function WorkoutsPage() {
     const exerciseIds = day.program_exercises?.map((pe: any) => pe.exercise_id) ?? []
     const prevLogs = await fetchPreviousLogs(exerciseIds, userId)
     setPreviousLogs(prevLogs)
+
+    // Calculate suggested weights for restored workout
+    const suggestions: Record<string, number> = {}
+    day.program_exercises?.forEach((pe: any) => {
+      const prev = prevLogs[pe.exercise_id]
+      if (prev?.weight_kg) {
+        const prevWeight = parseFloat(prev.weight_kg)
+        if (prevWeight > 0) {
+          suggestions[pe.exercise_id] = Math.round((prevWeight + 2.5) * 2) / 2
+        }
+      }
+    })
+    setSuggestedWeights(suggestions)
 
     const { data: currentLogs } = await supabase
       .from('exercise_logs')
@@ -532,6 +563,7 @@ export default function WorkoutsPage() {
           setLogs={setLogs}
           previousLogs={previousLogs}
           personalRecords={personalRecords}
+          suggestedWeights={suggestedWeights}
           completedSets={completedSets}
           totalSets={totalSets}
           feeling={feeling}

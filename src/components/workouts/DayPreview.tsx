@@ -85,9 +85,16 @@ export function DayPreview({
                     </span>
                   )}
                 </div>
+                <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-zinc-300 text-xs font-semibold">
                   {prev.weight_kg ? `${prev.weight_kg} kg` : '–'} × {prev.reps_completed ?? '–'} reps
                 </span>
+                {prev.weight_kg && (
+                  <span className="text-orange-400 text-xs font-bold bg-orange-500/15 px-1.5 py-0.5 rounded-full">
+                    → {Math.round((parseFloat(String(prev.weight_kg)) + 2.5) * 2) / 2} kg
+                  </span>
+                )}
+              </div>
               </div>
             )}
 
