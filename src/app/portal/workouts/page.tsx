@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { format } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { nl } from 'date-fns/locale'
 import { useAuth } from '@/hooks/useAuth'
 import { PageSpinner } from '@/components/ui/Spinner'
@@ -43,6 +43,11 @@ export default function WorkoutsPage() {
   const [suggestedWeights, setSuggestedWeights] = useState<Record<string, number>>({})
   const [readinessScore, setReadinessScore] = useState<number | null>(null)
   const [adjustmentReasons, setAdjustmentReasons] = useState<Record<string, string>>({})
+  // Program history (backlog)
+  const [pastPrograms, setPastPrograms] = useState<any[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+  const [viewingPastProgram, setViewingPastProgram] = useState<any>(null)
+  const [pastProgramWeeks, setPastProgramWeeks] = useState<any[]>([])
 
   /* ─── Helpers ─── */
 
@@ -142,6 +147,34 @@ export default function WorkoutsPage() {
       .order('start_date', { ascending: false })
       .limit(1)
       .single()
+
+    // Load past (inactive) programs for backlog
+    const { data: pastProgs } = await supabase
+      .from('programs')
+      .select('id, name, goal, start_date, is_active')
+      .eq('client_id', profile.id)
+      .eq('is_active', false)
+      .order('start_date', { ascending: false })
+      .limit(20)
+
+    if (pastProgs && pastProgs.length > 0) {
+      const pastIds = pastProgs.map(p => p.id)
+      const { data: pastWLogs } = await supabase
+        .from('workout_logs')
+        .select('program_id, completed_at')
+        .in('program_id', pastIds)
+        .not('completed_at', 'is', null)
+
+      const pastCountMap: Record<string, number> = {}
+      pastWLogs?.forEach((l: any) => {
+        pastCountMap[l.program_id] = (pastCountMap[l.program_id] ?? 0) + 1
+      })
+
+      setPastPrograms(pastProgs.map(p => ({
+        ...p,
+        completedWorkouts: pastCountMap[p.id] ?? 0,
+      })))
+    }
 
     if (!prog) {
       setLoading(false)
@@ -566,9 +599,128 @@ export default function WorkoutsPage() {
       {!program && (
         <EmptyState
           icon="🏋️"
-          title="Nog geen programma"
+          title="Nog geen actief programma"
           description="Je coach wijst binnenkort een programma toe."
         />
+      )}
+
+      {/* Past programs toggle */}
+      {pastPrograms.length > 0 && !selectedDay && (
+        <div className="px-4 pt-3">
+          <button
+            onClick={() => { setShowHistory(!showHistory); setViewingPastProgram(null) }}
+            className="w-full text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5
+                       hover:border-zinc-700 transition flex items-center justify-between"
+          >
+            <span>📁 Vorige programma&apos;s ({pastPrograms.length})</span>
+            <span>{showHistory ? '▲' : '▼'}</span>
+          </button>
+
+          {showHistory && (
+            <div className="mt-2 space-y-2">
+              {pastPrograms.map(pp => (
+                <button
+                  key={pp.id}
+                  onClick={async () => {
+                    if (viewingPastProgram?.id === pp.id) {
+                      setViewingPastProgram(null)
+                      setPastProgramWeeks([])
+                      return
+                    }
+                    // Load full past program
+                    const { data: fullProg } = await supabase
+                      .from('programs')
+                      .select(`*, program_weeks(*, program_days(*, program_exercises(*, exercises(*))))`)
+                      .eq('id', pp.id)
+                      .single()
+                    if (fullProg) {
+                      setViewingPastProgram(fullProg)
+                      const weeks = fullProg.program_weeks
+                        ?.sort((a: any, b: any) => a.week_number - b.week_number)
+                        .map((w: any) => ({
+                          ...w,
+                          program_days: w.program_days
+                            ?.sort((a: any, b: any) => a.day_number - b.day_number)
+                            .map((d: any) => ({
+                              ...d,
+                              program_exercises: d.program_exercises?.sort((a: any, b: any) => a.order_index - b.order_index),
+                            })),
+                        })) ?? []
+                      setPastProgramWeeks(weeks)
+
+                      // Load completed days for this past program
+                      const { data: pastCompletedLogs } = await supabase
+                        .from('workout_logs')
+                        .select('day_id')
+                        .eq('client_id', profile!.id)
+                        .eq('program_id', pp.id)
+                        .not('completed_at', 'is', null)
+                      const pastDoneIds = new Set<string>(
+                        pastCompletedLogs?.map((l: any) => l.day_id).filter(Boolean) ?? []
+                      )
+                      setViewingPastProgram((prev: any) => ({ ...prev, completedDayIds: pastDoneIds }))
+                    }
+                  }}
+                  className={`w-full text-left bg-zinc-900 border rounded-xl p-3 transition ${
+                    viewingPastProgram?.id === pp.id ? 'border-orange-500/40' : 'border-zinc-800 hover:border-zinc-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-white text-sm font-bold">{pp.name}</p>
+                      <p className="text-zinc-500 text-xs">
+                        {pp.start_date ? format(parseISO(pp.start_date), 'd MMM yyyy', { locale: nl }) : '–'}
+                        {' · '}{pp.completedWorkouts} workouts afgerond
+                      </p>
+                    </div>
+                    <span className="text-zinc-600 text-xs">
+                      {viewingPastProgram?.id === pp.id ? '▲' : '▶'}
+                    </span>
+                  </div>
+                </button>
+              ))}
+
+              {/* Expanded past program view */}
+              {viewingPastProgram && pastProgramWeeks.length > 0 && (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+                  <p className="text-white font-bold text-sm">
+                    {viewingPastProgram.name} — Overzicht
+                  </p>
+                  {pastProgramWeeks.map((week: any) => (
+                    <div key={week.id}>
+                      <p className="text-zinc-500 text-xs font-bold uppercase mb-1.5">
+                        Week {week.week_number}
+                      </p>
+                      <div className="space-y-1">
+                        {week.program_days?.map((day: any) => {
+                          const isDone = viewingPastProgram.completedDayIds?.has(day.id)
+                          return (
+                            <div key={day.id}
+                              className={`rounded-lg px-3 py-2 text-xs ${
+                                isDone ? 'bg-green-500/5 border border-green-500/20' : 'bg-zinc-800/50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                {isDone && <span className="text-green-400">✓</span>}
+                                <span className="text-white font-semibold">{day.label}</span>
+                                {day.rest_day && <span className="text-zinc-600">😴 Rust</span>}
+                              </div>
+                              {!day.rest_day && day.program_exercises?.length > 0 && (
+                                <div className="mt-1 text-zinc-500 text-[11px]">
+                                  {day.program_exercises.map((pe: any) => pe.exercises?.name).filter(Boolean).join(' · ')}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Program grid */}

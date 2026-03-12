@@ -61,6 +61,13 @@ export function ProgramBuilder({ coachId, clients }: ProgramBuilderProps) {
     if (!name || !clientId || !templateId) return
     setSaving(true)
 
+    // Deactivate existing active programs for this client
+    await supabase
+      .from('programs')
+      .update({ is_active: false })
+      .eq('client_id', clientId)
+      .eq('is_active', true)
+
     const { data: template } = await supabase
       .from('programs')
       .select(`
@@ -127,6 +134,14 @@ export function ProgramBuilder({ coachId, clients }: ProgramBuilderProps) {
   async function createProgram() {
     if (!name || !clientId) return
     setSaving(true)
+
+    // Deactivate existing active programs for this client
+    await supabase
+      .from('programs')
+      .update({ is_active: false })
+      .eq('client_id', clientId)
+      .eq('is_active', true)
+
     const { data: program } = await supabase
       .from('programs')
       .insert({ coach_id: coachId, client_id: clientId, name, goal, start_date: startDate, is_active: true })

@@ -28,6 +28,17 @@ export default function ClientDetail() {
   // Workout detail expansion
   const [expandedWorkout, setExpandedWorkout] = useState<string | null>(null)
   const [workoutDetails, setWorkoutDetails] = useState<Record<string, any[]>>({})
+  // Program detail expansion
+  const [expandedProgram, setExpandedProgram] = useState<string | null>(null)
+  const [programDetails, setProgramDetails] = useState<Record<string, any>>({})
+  // Exercise history view (Google Sheets style)
+  const [exerciseHistoryView, setExerciseHistoryView] = useState<string | null>(null) // exercise_id
+  const [exerciseHistory, setExerciseHistory] = useState<any[]>([])
+  const [exerciseHistoryName, setExerciseHistoryName] = useState('')
+  // Delete state
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  // Toggling active
+  const [togglingId, setTogglingId] = useState<string | null>(null)
 
   useEffect(() => { load() }, [clientId])
   useEffect(() => {
@@ -95,10 +106,18 @@ export default function ClientDetail() {
       })))
     }
 
-    // Programma's
+    // Programma's — volledig met structuur
     const { data: progs } = await supabase
       .from('programs')
-      .select(`id, name, goal, start_date, is_active, program_weeks(id)`)
+      .select(`id, name, goal, start_date, is_active, created_at,
+        program_weeks(id, week_number, label,
+          program_days(id, day_number, label, rest_day,
+            program_exercises(id, exercise_id, sets, reps, weight_kg, order_index,
+              exercises(id, name, muscle_group)
+            )
+          )
+        )
+      `)
       .eq('client_id', clientId)
       .order('start_date', { ascending: false })
 
@@ -106,20 +125,31 @@ export default function ClientDetail() {
       const progIds = progs.map(p => p.id)
       const { data: wLogs } = await supabase
         .from('workout_logs')
-        .select('program_id, completed_at')
+        .select('program_id, completed_at, day_id')
         .in('program_id', progIds)
         .not('completed_at', 'is', null)
 
       const countMap: Record<string, number> = {}
+      const completedDaysMap: Record<string, Set<string>> = {}
       wLogs?.forEach((l: any) => {
         countMap[l.program_id] = (countMap[l.program_id] ?? 0) + 1
+        if (!completedDaysMap[l.program_id]) completedDaysMap[l.program_id] = new Set()
+        if (l.day_id) completedDaysMap[l.program_id].add(l.day_id)
       })
 
-      setPrograms(progs.map(p => ({
-        ...p,
-        numWeeks: p.program_weeks?.length ?? 0,
-        completedWorkouts: countMap[p.id] ?? 0,
-      })))
+      setPrograms(progs.map(p => {
+        const weeks = p.program_weeks?.sort((a: any, b: any) => a.week_number - b.week_number) ?? []
+        const totalDays = weeks.reduce((acc: number, w: any) =>
+          acc + (w.program_days?.filter((d: any) => !d.rest_day).length ?? 0), 0)
+        return {
+          ...p,
+          program_weeks: weeks,
+          numWeeks: weeks.length,
+          totalDays,
+          completedWorkouts: countMap[p.id] ?? 0,
+          completedDays: completedDaysMap[p.id] ?? new Set(),
+        }
+      }))
     }
 
     // Readiness history (last 14 days)
@@ -145,7 +175,7 @@ export default function ClientDetail() {
     }
     const { data: exLogs } = await supabase
       .from('exercise_logs')
-      .select('*, exercises(name, muscle_group)')
+      .select('*, exercises(id, name, muscle_group)')
       .eq('workout_log_id', workoutLogId)
       .order('exercise_id')
       .order('set_number', { ascending: true })
@@ -161,11 +191,97 @@ export default function ClientDetail() {
     setExpandedWorkout(workoutLogId)
   }
 
+  // Load exercise history across all sessions (Google Sheets style)
+  async function loadExerciseHistory(exerciseId: string, exerciseName: string) {
+    if (exerciseHistoryView === exerciseId) {
+      setExerciseHistoryView(null)
+      return
+    }
+    setExerciseHistoryName(exerciseName)
+    setExerciseHistoryView(exerciseId)
+
+    // Get all completed workout logs for this client
+    const { data: wLogs } = await supabase
+      .from('workout_logs')
+      .select('id, logged_at')
+      .eq('client_id', clientId)
+      .not('completed_at', 'is', null)
+      .order('logged_at', { ascending: true })
+
+    if (!wLogs || wLogs.length === 0) { setExerciseHistory([]); return }
+
+    const wLogIds = wLogs.map(w => w.id)
+    const dateMap: Record<string, string> = {}
+    wLogs.forEach(w => { dateMap[w.id] = w.logged_at })
+
+    const { data: eLogs } = await supabase
+      .from('exercise_logs')
+      .select('workout_log_id, set_number, weight_kg, reps_completed, rpe')
+      .eq('exercise_id', exerciseId)
+      .in('workout_log_id', wLogIds)
+      .order('set_number', { ascending: true })
+
+    // Group by date
+    const byDate: Record<string, { date: string; sets: any[] }> = {}
+    eLogs?.forEach((el: any) => {
+      const date = dateMap[el.workout_log_id]?.split('T')[0] ?? 'unknown'
+      if (!byDate[date]) byDate[date] = { date, sets: [] }
+      byDate[date].sets.push(el)
+    })
+
+    setExerciseHistory(
+      Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date))
+    )
+  }
+
   async function deleteProgram(programId: string) {
-    if (!confirm('Weet je zeker dat je dit programma wilt verwijderen? Dit kan niet ongedaan worden.')) return
-    // Delete program_exercises, program_days, program_weeks first (cascade should handle this)
-    await supabase.from('programs').delete().eq('id', programId)
+    const prog = programs.find(p => p.id === programId)
+    const hasWorkouts = (prog?.completedWorkouts ?? 0) > 0
+    const msg = hasWorkouts
+      ? `Dit programma heeft ${prog.completedWorkouts} afgeronde workouts. Alle trainingsdata gaat verloren. Weet je het zeker?`
+      : 'Weet je zeker dat je dit programma wilt verwijderen?'
+    if (!confirm(msg)) return
+
+    setDeletingId(programId)
+    const { error } = await supabase.from('programs').delete().eq('id', programId)
+    if (error) {
+      alert(`Kon programma niet verwijderen: ${error.message}`)
+      setDeletingId(null)
+      return
+    }
     setPrograms(prev => prev.filter(p => p.id !== programId))
+    setDeletingId(null)
+  }
+
+  async function toggleProgramActive(programId: string, currentlyActive: boolean) {
+    setTogglingId(programId)
+
+    if (!currentlyActive) {
+      // Activating: deactivate all other programs first
+      await supabase
+        .from('programs')
+        .update({ is_active: false })
+        .eq('client_id', clientId)
+        .eq('is_active', true)
+    }
+
+    const { error } = await supabase
+      .from('programs')
+      .update({ is_active: !currentlyActive })
+      .eq('id', programId)
+
+    if (error) {
+      alert(`Kon status niet wijzigen: ${error.message}`)
+      setTogglingId(null)
+      return
+    }
+
+    setPrograms(prev => prev.map(p => {
+      if (p.id === programId) return { ...p, is_active: !currentlyActive }
+      if (!currentlyActive) return { ...p, is_active: false } // deactivate others
+      return p
+    }))
+    setTogglingId(null)
   }
 
   async function sendMessage() {
@@ -215,9 +331,9 @@ export default function ClientDetail() {
       <div className="flex bg-zinc-900 border-b border-zinc-800 flex-shrink-0">
         {[
           { key: 'berichten', label: '💬 Chat' },
-          { key: 'trainingen', label: `🏋️ Log${workoutHistory.length > 0 ? ` (${workoutHistory.length})` : ''}` },
+          { key: 'trainingen', label: `🏋️ Log` },
           { key: 'readiness', label: '📊 Readiness' },
-          { key: 'programmas', label: `📋 Prog.${programs.length > 0 ? ` (${programs.length})` : ''}` },
+          { key: 'programmas', label: `📋 Programma's` },
         ].map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
             className={`flex-1 py-3 text-xs font-semibold border-b-2 transition ${
@@ -265,7 +381,7 @@ export default function ClientDetail() {
                 onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
                 placeholder={`Bericht aan ${client?.full_name?.split(' ')[0]}...`}
                 className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3
-                           text-white text-sm placeholdex�zinc-500 focus:outline-none focus:border-orange-500" />
+                           text-white text-sm placeholder:text-zinc-500 focus:outline-none focus:border-orange-500" />
               <button onClick={sendMessage} disabled={sending || !newMessage.trim()}
                 className="bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white
                            font-bold px-4 rounded-xl text-sm transition">
@@ -279,6 +395,98 @@ export default function ClientDetail() {
       {/* TRAININGEN TAB */}
       {activeTab === 'trainingen' && (
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+
+          {/* Exercise History Modal (Google Sheets style) */}
+          {exerciseHistoryView && (
+            <div className="bg-zinc-900 border-2 border-orange-500/40 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-white font-black text-sm">📊 {exerciseHistoryName}</h3>
+                <button onClick={() => setExerciseHistoryView(null)}
+                  className="text-zinc-500 text-xs bg-zinc-800 px-2 py-1 rounded-lg hover:text-white transition">
+                  ✕ Sluiten
+                </button>
+              </div>
+              <p className="text-zinc-500 text-xs">Gewicht & reps per datum — alle sessies</p>
+
+              {exerciseHistory.length === 0 ? (
+                <p className="text-zinc-600 text-xs py-4 text-center">Geen data gevonden</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-zinc-800">
+                        <th className="text-left text-zinc-500 font-semibold py-2 pr-3 sticky left-0 bg-zinc-900">Datum</th>
+                        <th className="text-center text-zinc-500 font-semibold py-2 px-2">Set</th>
+                        <th className="text-right text-zinc-500 font-semibold py-2 px-2">Gewicht</th>
+                        <th className="text-right text-zinc-500 font-semibold py-2 px-2">Reps</th>
+                        <th className="text-right text-zinc-500 font-semibold py-2 px-2">RPE</th>
+                        <th className="text-right text-zinc-500 font-semibold py-2 pl-2">Volume</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {exerciseHistory.map((day) => (
+                        day.sets.map((set: any, si: number) => (
+                          <tr key={`${day.date}-${si}`} className={si === 0 ? 'border-t border-zinc-800/50' : ''}>
+                            <td className="text-zinc-400 font-semibold py-1.5 pr-3 sticky left-0 bg-zinc-900">
+                              {si === 0 ? format(parseISO(day.date), 'd MMM', { locale: nl }) : ''}
+                            </td>
+                            <td className="text-center text-zinc-600 py-1.5 px-2">S{set.set_number}</td>
+                            <td className="text-right text-white font-bold py-1.5 px-2">{set.weight_kg ?? '–'} kg</td>
+                            <td className="text-right text-zinc-300 py-1.5 px-2">× {set.reps_completed ?? '–'}</td>
+                            <td className="text-right py-1.5 px-2">
+                              {set.rpe ? (
+                                <span className={`px-1.5 py-0.5 rounded font-bold ${
+                                  set.rpe >= 9.5 ? 'bg-red-500/20 text-red-400' :
+                                  set.rpe >= 8 ? 'bg-orange-500/20 text-orange-400' :
+                                  'bg-green-500/20 text-green-400'
+                                }`}>
+                                  {set.rpe}
+                                </span>
+                              ) : (
+                                <span className="text-zinc-700">–</span>
+                              )}
+                            </td>
+                            <td className="text-right text-zinc-600 py-1.5 pl-2">
+                              {((set.weight_kg ?? 0) * (set.reps_completed ?? 0))} kg
+                            </td>
+                          </tr>
+                        ))
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Summary row */}
+              {exerciseHistory.length > 0 && (() => {
+                const allSets = exerciseHistory.flatMap(d => d.sets)
+                const maxWeight = Math.max(...allSets.map((s: any) => s.weight_kg ?? 0))
+                const lastDay = exerciseHistory[exerciseHistory.length - 1]
+                const firstDay = exerciseHistory[0]
+                const firstWeight = firstDay.sets[0]?.weight_kg ?? 0
+                const lastWeight = lastDay.sets[0]?.weight_kg ?? 0
+                const progression = firstWeight > 0 ? lastWeight - firstWeight : 0
+                return (
+                  <div className="flex gap-3 pt-2 border-t border-zinc-800">
+                    <div className="bg-zinc-800 rounded-lg px-3 py-2 flex-1 text-center">
+                      <p className="text-zinc-500 text-[10px]">PR</p>
+                      <p className="text-orange-400 font-black text-sm">{maxWeight} kg</p>
+                    </div>
+                    <div className="bg-zinc-800 rounded-lg px-3 py-2 flex-1 text-center">
+                      <p className="text-zinc-500 text-[10px]">Sessies</p>
+                      <p className="text-white font-black text-sm">{exerciseHistory.length}</p>
+                    </div>
+                    <div className="bg-zinc-800 rounded-lg px-3 py-2 flex-1 text-center">
+                      <p className="text-zinc-500 text-[10px]">Progressie</p>
+                      <p className={`font-black text-sm ${progression > 0 ? 'text-green-400' : progression < 0 ? 'text-red-400' : 'text-zinc-400'}`}>
+                        {progression > 0 ? '+' : ''}{progression} kg
+                      </p>
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+          )}
 
           {/* Stats */}
           <div className="grid grid-cols-3 gap-2">
@@ -332,13 +540,13 @@ export default function ClientDetail() {
                             )}
                           </div>
                           <p className="text-zinc-500 text-xs mt-0.5">
-                            {format(parseISO(log.logged_at), 'EEEE d MMMM yyyy', { locale: nl })}
+                            {format(parseISO(log.logged_at), 'EEE d MMM yyyy', { locale: nl })}
                           </p>
                           <div className="flex gap-3 mt-1">
                             <span className="text-zinc-400 text-xs">{log.setsCount} sets</span>
                             {log.volume > 0 && (
                               <span className="text-zinc-400 text-xs">
-                                {log.volume >= 1000 ? `${Math.round(log.volume / 1000)}k` : Math.round(log.volume)} kg volume
+                                {log.volume >= 1000 ? `${Math.round(log.volume / 1000)}k` : Math.round(log.volume)} kg vol.
                               </span>
                             )}
                           </div>
@@ -350,17 +558,29 @@ export default function ClientDetail() {
                       </div>
                     </button>
 
-                    {/* Expanded: per-exercise detail with weights */}
+                    {/* Expanded: per-exercise detail */}
                     {expandedWorkout === log.id && workoutDetails[log.id] && (
                       <div className="px-4 pb-3 space-y-2">
                         {workoutDetails[log.id].map((group: any, gi: number) => (
                           <div key={gi} className="bg-zinc-800/50 rounded-lg p-3">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="text-zinc-600 text-xs font-bold">{gi + 1}</span>
-                              <span className="text-white text-xs font-bold">{group.exercise?.name}</span>
-                              {group.exercise?.muscle_group && (
-                                <span className="text-zinc-500 text-[10px]">{group.exercise.muscle_group}</span>
-                              )}
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-zinc-600 text-xs font-bold">{gi + 1}</span>
+                                <span className="text-white text-xs font-bold">{group.exercise?.name}</span>
+                                {group.exercise?.muscle_group && (
+                                  <span className="text-zinc-500 text-[10px]">{group.exercise.muscle_group}</span>
+                                )}
+                              </div>
+                              {/* View history button */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  loadExerciseHistory(group.exercise?.id, group.exercise?.name ?? 'Oefening')
+                                }}
+                                className="text-[10px] text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded hover:bg-orange-500/20 transition"
+                              >
+                                📊 Historie
+                              </button>
                             </div>
                             <div className="space-y-1">
                               {group.sets.map((set: any, si: number) => (
@@ -501,52 +721,161 @@ export default function ClientDetail() {
               <p className="text-zinc-500 text-sm">Nog geen programma&apos;s toegewezen</p>
             </div>
           ) : (
-            programs.map(prog => (
-              <div key={prog.id} className={`bg-zinc-900 border rounded-2xl p-4 ${
-                prog.is_active ? 'border-orange-500/40' : 'border-zinc-800'
-              }`}>
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-white font-bold">{prog.name}</p>
-                      {prog.is_active && (
-                        <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-bold">
-                          Actief
-                        </span>
-                      )}
+            programs.map(prog => {
+              const isExpanded = expandedProgram === prog.id
+              const progressPct = prog.totalDays > 0
+                ? Math.round((prog.completedWorkouts / prog.totalDays) * 100)
+                : 0
+
+              return (
+                <div key={prog.id} className={`bg-zinc-900 border rounded-2xl overflow-hidden ${
+                  prog.is_active ? 'border-orange-500/40' : 'border-zinc-800'
+                }`}>
+                  {/* Program header */}
+                  <div className="p-4">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xl">{goalEmoji[prog.goal] ?? '📋'}</span>
+                          <p className="text-white font-bold">{prog.name}</p>
+                          {prog.is_active ? (
+                            <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-bold">
+                              Actief
+                            </span>
+                          ) : (
+                            <span className="text-[10px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-full font-bold">
+                              Inactief
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-zinc-500 text-xs mt-0.5">
+                          {prog.start_date
+                            ? format(parseISO(prog.start_date), 'd MMMM yyyy', { locale: nl })
+                            : '–'
+                          } · {goalLabel[prog.goal] ?? prog.goal}
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-zinc-500 text-xs mt-0.5">
-                      Gestart: {prog.start_date
-                        ? format(parseISO(prog.start_date), 'd MMMM yyyy', { locale: nl })
-                        : '–'
-                      }
-                    </p>
+
+                    {/* Progress bar */}
+                    <div className="mb-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-zinc-500 text-[10px]">
+                          {prog.completedWorkouts}/{prog.totalDays} trainingen
+                        </span>
+                        <span className="text-zinc-500 text-[10px] font-bold">{progressPct}%</span>
+                      </div>
+                      <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${prog.is_active ? 'bg-orange-500' : 'bg-zinc-600'}`}
+                          style={{ width: `${Math.min(progressPct, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Info badges */}
+                    <div className="flex gap-2 flex-wrap mb-3">
+                      <span className="text-xs bg-zinc-800 text-zinc-400 px-2 py-1 rounded-lg">
+                        {prog.numWeeks} {prog.numWeeks === 1 ? 'week' : 'weken'}
+                      </span>
+                      <span className="text-xs bg-zinc-800 text-zinc-400 px-2 py-1 rounded-lg">
+                        {prog.totalDays} trainingsdagen
+                      </span>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setExpandedProgram(isExpanded ? null : prog.id)}
+                        className="flex-1 text-xs text-white bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2
+                                   hover:bg-zinc-700 transition font-semibold"
+                      >
+                        {isExpanded ? '▲ Inklappen' : '▼ Bekijk structuur'}
+                      </button>
+                      <button
+                        onClick={() => toggleProgramActive(prog.id, prog.is_active)}
+                        disabled={togglingId === prog.id}
+                        className={`text-xs rounded-lg px-3 py-2 transition font-semibold ${
+                          prog.is_active
+                            ? 'text-zinc-400 bg-zinc-800 border border-zinc-700 hover:bg-zinc-700'
+                            : 'text-orange-400 bg-orange-500/10 border border-orange-500/20 hover:bg-orange-500/20'
+                        }`}
+                      >
+                        {togglingId === prog.id ? '...' : prog.is_active ? 'Deactiveer' : 'Activeer'}
+                      </button>
+                      <button
+                        onClick={() => deleteProgram(prog.id)}
+                        disabled={deletingId === prog.id}
+                        className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2
+                                   hover:bg-red-500/20 transition font-semibold"
+                      >
+                        {deletingId === prog.id ? '...' : '🗑'}
+                      </button>
+                    </div>
                   </div>
-                  <span className="text-2xl ml-2">{goalEmoji[prog.goal] ?? '📋'}</span>
+
+                  {/* Expanded: full program structure */}
+                  {isExpanded && prog.program_weeks && (
+                    <div className="border-t border-zinc-800 px-4 pb-4 pt-3 space-y-3">
+                      {prog.program_weeks.map((week: any) => {
+                        const days = week.program_days?.sort((a: any, b: any) => a.day_number - b.day_number) ?? []
+                        return (
+                          <div key={week.id}>
+                            <p className="text-zinc-500 text-xs font-bold uppercase tracking-wider mb-2">
+                              {week.label || `Week ${week.week_number}`}
+                            </p>
+                            <div className="space-y-1.5">
+                              {days.map((day: any) => {
+                                const exercises = day.program_exercises
+                                  ?.sort((a: any, b: any) => a.order_index - b.order_index) ?? []
+                                const isDone = prog.completedDays?.has(day.id)
+                                return (
+                                  <div key={day.id}
+                                    className={`rounded-lg p-2.5 ${
+                                      isDone ? 'bg-green-500/5 border border-green-500/20' : 'bg-zinc-800/50'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 mb-1">
+                                      {isDone && <span className="text-green-400 text-xs">✓</span>}
+                                      <span className="text-white text-xs font-bold">{day.label}</span>
+                                      {day.rest_day && <span className="text-zinc-600 text-xs">😴 Rust</span>}
+                                    </div>
+                                    {!day.rest_day && exercises.length > 0 && (
+                                      <div className="space-y-0.5">
+                                        {exercises.map((pe: any, ei: number) => (
+                                          <div key={pe.id} className="flex items-center gap-2 text-[11px]">
+                                            <span className="text-zinc-600 w-4">{ei + 1}.</span>
+                                            <button
+                                              onClick={() => loadExerciseHistory(pe.exercise_id, pe.exercises?.name ?? 'Oefening')}
+                                              className="text-zinc-300 hover:text-orange-400 transition truncate flex-1 text-left"
+                                            >
+                                              {pe.exercises?.name ?? 'Oefening'}
+                                            </button>
+                                            <span className="text-zinc-500 flex-shrink-0">
+                                              {pe.sets}×{pe.reps}{pe.weight_kg ? ` · ${pe.weight_kg}kg` : ''}
+                                            </span>
+                                            <span className="text-zinc-700 flex-shrink-0 text-[10px]">
+                                              {pe.exercises?.muscle_group ?? ''}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {!day.rest_day && exercises.length === 0 && (
+                                      <p className="text-zinc-600 text-[11px]">Geen oefeningen toegevoegd</p>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
-                <div className="flex gap-2 flex-wrap mt-2">
-                  <span className="text-xs bg-zinc-800 text-zinc-400 px-2 py-1 rounded-lg">
-                    {goalLabel[prog.goal] ?? prog.goal}
-                  </span>
-                  <span className="text-xs bg-zinc-800 text-zinc-400 px-2 py-1 rounded-lg">
-                    {prog.numWeeks} {prog.numWeeks === 1 ? 'week' : 'weken'}
-                  </span>
-                  <span className={`text-xs px-2 py-1 rounded-lg ${
-                    prog.completedWorkouts > 0 ? 'bg-green-500/15 text-green-400' : 'bg-zinc-800 text-zinc-500'
-                  }`}>
-                    ✓ {prog.completedWorkouts} workouts
-                  </span>
-                </div>
-                {/* Delete program button */}
-                <button
-                  onClick={() => deleteProgram(prog.id)}
-                  className="mt-3 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-1.5
-                             hover:bg-red-500/20 transition"
-                >
-                  Programma verwijderen
-                </button>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
       )}
