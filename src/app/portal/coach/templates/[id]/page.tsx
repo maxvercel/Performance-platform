@@ -45,15 +45,13 @@ export default function TemplateEditorPage() {
     if (!user) { router.push('/portal/login'); return }
     setProfile(user)
 
-    // Load template with weeks, days, and saved exercises
+    // Load template with weeks and days (without nested template_exercises to avoid PostgREST cache issues)
     const { data: tmpl } = await supabase
       .from('program_templates')
       .select(`
         id, name, goal, num_weeks, days_per_week, coach_id,
         template_weeks(id, week_number, label,
-          template_days(id, day_number, label, rest_day,
-            template_exercises(id, exercise_name, sets, reps, weight_kg, rest_seconds, notes, order_index)
-          )
+          template_days(id, day_number, label, rest_day)
         )
       `)
       .eq('id', templateId)
@@ -70,31 +68,34 @@ export default function TemplateEditorPage() {
         ...w,
         template_days: (w.template_days ?? [])
           .sort((a: any, b: any) => a.day_number - b.day_number)
-          .map((d: any) => ({
-            ...d,
-            template_exercises: (d.template_exercises ?? []).sort((a: any, b: any) => a.order_index - b.order_index)
-          }))
       }))
     setWeeks(sortedWeeks)
 
-    // Build saved exercises map by day_id
+    // Load saved exercises separately (avoids PostgREST schema cache issues with new tables)
+    const allDayIds = sortedWeeks.flatMap((w: any) => w.template_days.map((d: any) => d.id))
     const exMap: Record<string, any[]> = {}
-    sortedWeeks.forEach((w: any) => {
-      w.template_days.forEach((d: any) => {
-        if (d.template_exercises && d.template_exercises.length > 0) {
-          exMap[d.id] = d.template_exercises.map((ex: any) => ({
-            id: ex.id,
-            name: ex.exercise_name,
-            sets: ex.sets,
-            reps: ex.reps,
-            weight_kg: ex.weight_kg,
-            rest_seconds: ex.rest_seconds,
-            notes: ex.notes,
-            order_index: ex.order_index,
-          }))
-        }
+
+    if (allDayIds.length > 0) {
+      const { data: savedEx } = await supabase
+        .from('template_exercises')
+        .select('id, day_id, exercise_name, sets, reps, weight_kg, rest_seconds, notes, order_index')
+        .in('day_id', allDayIds)
+        .order('order_index', { ascending: true })
+
+      savedEx?.forEach((ex: any) => {
+        if (!exMap[ex.day_id]) exMap[ex.day_id] = []
+        exMap[ex.day_id].push({
+          id: ex.id,
+          name: ex.exercise_name,
+          sets: ex.sets,
+          reps: ex.reps,
+          weight_kg: ex.weight_kg,
+          rest_seconds: ex.rest_seconds,
+          notes: ex.notes,
+          order_index: ex.order_index,
+        })
       })
-    })
+    }
     setSavedExercises(exMap)
 
     // Load coach's clients
