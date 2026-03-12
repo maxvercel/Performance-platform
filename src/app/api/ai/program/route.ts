@@ -164,7 +164,8 @@ Retourneer dit JSON:
             .from('exercises')
             .select('id')
             .ilike('name', ex.name.trim())
-            .single()
+            .limit(1)
+            .maybeSingle()
           if (!existing) {
             await supabase.from('exercises').insert({
               name: ex.name.trim(),

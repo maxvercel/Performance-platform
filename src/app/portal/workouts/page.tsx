@@ -146,7 +146,7 @@ export default function WorkoutsPage() {
       .eq('is_active', true)
       .order('start_date', { ascending: false })
       .limit(1)
-      .single()
+      .maybeSingle()
 
     // Load past (inactive) programs for backlog
     const { data: pastProgs } = await supabase

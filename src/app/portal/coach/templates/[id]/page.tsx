@@ -152,11 +152,17 @@ export default function TemplateEditorPage() {
     setApplying(true)
 
     // 1. Deactivate existing programs for this client
-    await supabase
+    const { error: deactivateErr } = await supabase
       .from('programs')
       .update({ is_active: false })
       .eq('client_id', selectedClient)
       .eq('is_active', true)
+
+    if (deactivateErr) {
+      alert(`Kon bestaande programma's niet deactiveren: ${deactivateErr.message}`)
+      setApplying(false)
+      return
+    }
 
     // 2. Create program
     const { data: program } = await supabase
@@ -209,7 +215,7 @@ export default function TemplateEditorPage() {
             .select('id')
             .ilike('name', ex.name.trim())
             .limit(1)
-            .single()
+            .maybeSingle()
 
           if (dbExercise) {
             await supabase.from('program_exercises').insert({
