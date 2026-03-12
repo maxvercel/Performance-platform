@@ -16,13 +16,18 @@ export default function ClientDetail() {
   const [newMessage, setNewMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'berichten' | 'trainingen' | 'programmas'>('berichten')
+  const [activeTab, setActiveTab] = useState<'berichten' | 'trainingen' | 'programmas' | 'readiness'>('berichten')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Trainingen
   const [workoutHistory, setWorkoutHistory] = useState<any[]>([])
   // Programma's
   const [programs, setPrograms] = useState<any[]>([])
+  // Readiness
+  const [readinessHistory, setReadinessHistory] = useState<any[]>([])
+  // Workout detail expansion
+  const [expandedWorkout, setExpandedWorkout] = useState<string | null>(null)
+  const [workoutDetails, setWorkoutDetails] = useState<Record<string, any[]>>({})
 
   useEffect(() => { load() }, [clientId])
   useEffect(() => {
@@ -117,7 +122,50 @@ export default function ClientDetail() {
       })))
     }
 
+    // Readiness history (last 14 days)
+    const { data: readiness } = await supabase
+      .from('daily_readiness')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('date', { ascending: false })
+      .limit(14)
+    setReadinessHistory(readiness ?? [])
+
     setLoading(false)
+  }
+
+  async function loadWorkoutDetail(workoutLogId: string) {
+    if (expandedWorkout === workoutLogId) {
+      setExpandedWorkout(null)
+      return
+    }
+    if (workoutDetails[workoutLogId]) {
+      setExpandedWorkout(workoutLogId)
+      return
+    }
+    const { data: exLogs } = await supabase
+      .from('exercise_logs')
+      .select('*, exercises(name, muscle_group)')
+      .eq('workout_log_id', workoutLogId)
+      .order('exercise_id')
+      .order('set_number', { ascending: true })
+
+    // Group by exercise
+    const grouped: Record<string, { exercise: any; sets: any[] }> = {}
+    exLogs?.forEach((el: any) => {
+      const exId = el.exercise_id
+      if (!grouped[exId]) grouped[exId] = { exercise: el.exercises, sets: [] }
+      grouped[exId].sets.push(el)
+    })
+    setWorkoutDetails(prev => ({ ...prev, [workoutLogId]: Object.values(grouped) }))
+    setExpandedWorkout(workoutLogId)
+  }
+
+  async function deleteProgram(programId: string) {
+    if (!confirm('Weet je zeker dat je dit programma wilt verwijderen? Dit kan niet ongedaan worden.')) return
+    // Delete program_exercises, program_days, program_weeks first (cascade should handle this)
+    await supabase.from('programs').delete().eq('id', programId)
+    setPrograms(prev => prev.filter(p => p.id !== programId))
   }
 
   async function sendMessage() {
@@ -166,9 +214,10 @@ export default function ClientDetail() {
       {/* Tabs */}
       <div className="flex bg-zinc-900 border-b border-zinc-800 flex-shrink-0">
         {[
-          { key: 'berichten', label: '💬 Berichten' },
-          { key: 'trainingen', label: `🏋️ Trainingen${workoutHistory.length > 0 ? ` (${workoutHistory.length})` : ''}` },
-          { key: 'programmas', label: `📋 Programma's${programs.length > 0 ? ` (${programs.length})` : ''}` },
+          { key: 'berichten', label: '💬 Chat' },
+          { key: 'trainingen', label: `🏋️ Log${workoutHistory.length > 0 ? ` (${workoutHistory.length})` : ''}` },
+          { key: 'readiness', label: '📊 Readiness' },
+          { key: 'programmas', label: `📋 Prog.${programs.length > 0 ? ` (${programs.length})` : ''}` },
         ].map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
             className={`flex-1 py-3 text-xs font-semibold border-b-2 transition ${
@@ -267,37 +316,177 @@ export default function ClientDetail() {
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
               <div className="divide-y divide-zinc-800">
                 {workoutHistory.map(log => (
-                  <div key={log.id} className="px-4 py-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="text-white font-bold text-sm">
-                            {log.program_days?.label ?? 'Workout'}
+                  <div key={log.id}>
+                    <button
+                      onClick={() => loadWorkoutDetail(log.id)}
+                      className="w-full px-4 py-3 text-left hover:bg-zinc-800/50 transition"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-white font-bold text-sm">
+                              {log.program_days?.label ?? 'Workout'}
+                            </p>
+                            {log.feeling && (
+                              <span className="text-base">{feelingEmoji[log.feeling]}</span>
+                            )}
+                          </div>
+                          <p className="text-zinc-500 text-xs mt-0.5">
+                            {format(parseISO(log.logged_at), 'EEEE d MMMM yyyy', { locale: nl })}
                           </p>
-                          {log.feeling && (
-                            <span className="text-base">{feelingEmoji[log.feeling]}</span>
-                          )}
+                          <div className="flex gap-3 mt-1">
+                            <span className="text-zinc-400 text-xs">{log.setsCount} sets</span>
+                            {log.volume > 0 && (
+                              <span className="text-zinc-400 text-xs">
+                                {log.volume >= 1000 ? `${Math.round(log.volume / 1000)}k` : Math.round(log.volume)} kg volume
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-zinc-500 text-xs mt-0.5">
-                          {format(parseISO(log.logged_at), 'EEEE d MMMM yyyy', { locale: nl })}
-                        </p>
-                        <div className="flex gap-3 mt-1">
-                          <span className="text-zinc-400 text-xs">{log.setsCount} sets</span>
-                          {log.volume > 0 && (
-                            <span className="text-zinc-400 text-xs">
-                              {log.volume >= 1000 ? `${Math.round(log.volume / 1000)}k` : Math.round(log.volume)} kg volume
-                            </span>
-                          )}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <p className="text-zinc-600 text-xs text-right">{log.programs?.name}</p>
+                          <span className="text-zinc-600 text-xs">{expandedWorkout === log.id ? '▼' : '▶'}</span>
                         </div>
                       </div>
-                      <p className="text-zinc-600 text-xs ml-3 flex-shrink-0 text-right">
-                        {log.programs?.name}
-                      </p>
-                    </div>
+                    </button>
+
+                    {/* Expanded: per-exercise detail with weights */}
+                    {expandedWorkout === log.id && workoutDetails[log.id] && (
+                      <div className="px-4 pb-3 space-y-2">
+                        {workoutDetails[log.id].map((group: any, gi: number) => (
+                          <div key={gi} className="bg-zinc-800/50 rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-zinc-600 text-xs font-bold">{gi + 1}</span>
+                              <span className="text-white text-xs font-bold">{group.exercise?.name}</span>
+                              {group.exercise?.muscle_group && (
+                                <span className="text-zinc-500 text-[10px]">{group.exercise.muscle_group}</span>
+                              )}
+                            </div>
+                            <div className="space-y-1">
+                              {group.sets.map((set: any, si: number) => (
+                                <div key={si} className="flex items-center gap-3 text-xs">
+                                  <span className="text-zinc-600 w-6">S{set.set_number}</span>
+                                  <span className="text-white font-bold w-14">{set.weight_kg ?? '–'} kg</span>
+                                  <span className="text-zinc-400 w-12">× {set.reps_completed ?? '–'}</span>
+                                  {set.rpe && (
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                      set.rpe >= 9.5 ? 'bg-red-500/20 text-red-400' :
+                                      set.rpe >= 8 ? 'bg-orange-500/20 text-orange-400' :
+                                      'bg-green-500/20 text-green-400'
+                                    }`}>
+                                      RPE {set.rpe}
+                                    </span>
+                                  )}
+                                  <span className="text-zinc-700 text-[10px] ml-auto">
+                                    {((set.weight_kg ?? 0) * (set.reps_completed ?? 0))} kg vol.
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* READINESS TAB */}
+      {activeTab === 'readiness' && (
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+          {readinessHistory.length === 0 ? (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 text-center">
+              <div className="text-4xl mb-3">📊</div>
+              <p className="text-zinc-500 text-sm">Nog geen readiness data</p>
+              <p className="text-zinc-600 text-xs mt-1">Client moet dagelijks check-in invullen</p>
+            </div>
+          ) : (
+            <>
+              {/* Score trend */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+                <p className="text-white font-bold text-sm mb-3">Readiness trend (14 dagen)</p>
+                <div className="flex items-end gap-1 h-20">
+                  {readinessHistory.slice().reverse().map((r: any, i: number) => {
+                    const score = r.readiness_score ?? 0
+                    const h = (score / 5) * 100
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                        <div
+                          className={`w-full rounded-t ${
+                            score >= 4 ? 'bg-green-500' : score >= 3 ? 'bg-yellow-500' : score >= 2 ? 'bg-orange-500' : 'bg-red-500'
+                          }`}
+                          style={{ height: `${h}%`, minHeight: score > 0 ? '4px' : '0' }}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="flex justify-between mt-1">
+                  <span className="text-zinc-700 text-[10px]">
+                    {readinessHistory.length > 0 ? readinessHistory[readinessHistory.length - 1].date?.slice(5) : ''}
+                  </span>
+                  <span className="text-zinc-700 text-[10px]">
+                    {readinessHistory.length > 0 ? readinessHistory[0].date?.slice(5) : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* Daily entries */}
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="divide-y divide-zinc-800">
+                  {readinessHistory.map((r: any) => (
+                    <div key={r.id} className="px-4 py-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-zinc-400 text-xs font-semibold">
+                          {r.date ? format(parseISO(r.date), 'EEE d MMM', { locale: nl }) : ''}
+                        </p>
+                        <span className={`font-black text-sm ${
+                          (r.readiness_score ?? 0) >= 4 ? 'text-green-400' :
+                          (r.readiness_score ?? 0) >= 3 ? 'text-yellow-400' :
+                          (r.readiness_score ?? 0) >= 2 ? 'text-orange-400' : 'text-red-400'
+                        }`}>
+                          {r.readiness_score?.toFixed(1) ?? '–'}/5
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2 text-[10px]">
+                        {r.sleep_hours && (
+                          <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
+                            💤 {r.sleep_hours}u
+                          </span>
+                        )}
+                        {r.sleep_quality && (
+                          <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
+                            Slaap: {r.sleep_quality}/5
+                          </span>
+                        )}
+                        {r.energy_level && (
+                          <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
+                            Energie: {r.energy_level}/5
+                          </span>
+                        )}
+                        {r.muscle_soreness && (
+                          <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
+                            Spierpijn: {r.muscle_soreness}/5
+                          </span>
+                        )}
+                        {r.stress_level && (
+                          <span className="bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
+                            Stress: {r.stress_level}/5
+                          </span>
+                        )}
+                      </div>
+                      {r.notes && (
+                        <p className="text-zinc-600 text-xs mt-1 italic">{r.notes}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -348,6 +537,14 @@ export default function ClientDetail() {
                     ✓ {prog.completedWorkouts} workouts
                   </span>
                 </div>
+                {/* Delete program button */}
+                <button
+                  onClick={() => deleteProgram(prog.id)}
+                  className="mt-3 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-1.5
+                             hover:bg-red-500/20 transition"
+                >
+                  Programma verwijderen
+                </button>
               </div>
             ))
           )}

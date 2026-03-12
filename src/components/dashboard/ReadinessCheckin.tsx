@@ -14,7 +14,6 @@ const FACTORS = [
   { key: 'energy_level',     label: 'Energieniveau',    emoji: ['🪫', '😶', '😐', '⚡', '🔋'], low: 'Leeg', high: 'Vol energie' },
   { key: 'muscle_soreness',  label: 'Spierpijn',       emoji: ['🤕', '😣', '😐', '💪', '✨'], low: 'Veel pijn', high: 'Geen pijn' },
   { key: 'stress_level',     label: 'Stressniveau',     emoji: ['🤯', '😰', '😐', '😌', '🧘'], low: 'Veel stress', high: 'Ontspannen' },
-  { key: 'motivation',       label: 'Motivatie',        emoji: ['😞', '😕', '😐', '😤', '🔥'], low: 'Geen zin', high: 'Volle gas' },
 ] as const
 
 type FactorKey = typeof FACTORS[number]['key']
@@ -24,17 +23,41 @@ function getLocalDate(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
+/**
+ * Sleep scoring based on research (Hirshkowitz et al. 2015, NSF guidelines):
+ * - <5h: severely insufficient → 1
+ * - 5-6h: insufficient → 2
+ * - 6-7h: borderline → 3
+ * - 7-9h: optimal → 5
+ * - 9-10h: slightly excessive but acceptable → 4
+ * - >10h: excessive (may indicate illness/overtraining) → 3
+ */
+function sleepScore(hours: number): number {
+  if (hours >= 7 && hours <= 9) return 5
+  if (hours > 9 && hours <= 10) return 4
+  if (hours >= 6 && hours < 7) return 3
+  if (hours > 10) return 3
+  if (hours >= 5) return 2
+  return 1
+}
+
+function sleepLabel(hours: number): string {
+  if (hours >= 7 && hours <= 9) return '✅ Optimaal'
+  if (hours > 9 && hours <= 10) return '😴 Iets veel'
+  if (hours >= 6 && hours < 7) return '⚠️ Borderline'
+  if (hours > 10) return '⚠️ Te veel'
+  if (hours >= 5) return '❌ Te weinig'
+  return '❌ Ernstig tekort'
+}
+
 function calcReadinessScore(data: Partial<Record<FactorKey, number>>, sleepHours: number | null): number {
   const values: number[] = []
   for (const f of FACTORS) {
     const v = data[f.key]
     if (v) values.push(v)
   }
-  // Sleep hours bonus/penalty: 7-9h optimal
   if (sleepHours !== null) {
-    if (sleepHours >= 7 && sleepHours <= 9) values.push(5)
-    else if (sleepHours >= 6) values.push(3)
-    else values.push(1)
+    values.push(sleepScore(sleepHours))
   }
   if (values.length === 0) return 0
   return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10
@@ -110,7 +133,7 @@ export default function ReadinessCheckin({ userId, onScoreUpdate }: ReadinessChe
 
   const score = calcReadinessScore(factors, sleepHours ? parseFloat(sleepHours) : null)
   const filledCount = Object.keys(factors).length + (sleepHours ? 1 : 0)
-  const isComplete = filledCount >= 4 // At least 4 of 6 fields filled
+  const isComplete = filledCount >= 3 // At least 3 of 5 fields filled
 
   async function saveReadiness() {
     if (!isComplete) return
@@ -124,7 +147,7 @@ export default function ReadinessCheckin({ userId, onScoreUpdate }: ReadinessChe
       energy_level: factors.energy_level ?? null,
       stress_level: factors.stress_level ?? null,
       muscle_soreness: factors.muscle_soreness ?? null,
-      motivation: factors.motivation ?? null,
+      motivation: null,
       notes: notes || null,
       readiness_score: score,
     }
@@ -138,6 +161,7 @@ export default function ReadinessCheckin({ userId, onScoreUpdate }: ReadinessChe
 
     setSaved(true)
     setSaving(false)
+    setExpanded(false) // Auto-collapse after save
     onScoreUpdate?.(score)
   }
 
@@ -169,7 +193,7 @@ export default function ReadinessCheckin({ userId, onScoreUpdate }: ReadinessChe
             </p>
           )}
         </div>
-        <span className="text-zinc-600 text-sm">→</span>
+        <span className="text-zinc-600 text-sm">{saved ? '✏️' : '→'}</span>
       </button>
     )
   }
@@ -210,7 +234,7 @@ export default function ReadinessCheckin({ userId, onScoreUpdate }: ReadinessChe
           </div>
           <div>
             <p className={`font-bold text-sm ${scoreColor(score)}`}>{scoreLabel(score)}</p>
-            <p className="text-zinc-600 text-xs mt-0.5">{filledCount}/6 factoren ingevuld</p>
+            <p className="text-zinc-600 text-xs mt-0.5">{filledCount}/5 factoren ingevuld</p>
           </div>
         </div>
       )}
@@ -236,7 +260,7 @@ export default function ReadinessCheckin({ userId, onScoreUpdate }: ReadinessChe
           <span className="text-zinc-500 text-xs">uur</span>
           {sleepHours && (
             <span className="text-zinc-600 text-xs ml-auto">
-              {parseFloat(sleepHours) >= 7 ? '👍 Goed' : parseFloat(sleepHours) >= 6 ? '😐 Oké' : '⚠️ Te weinig'}
+              {sleepLabel(parseFloat(sleepHours))}
             </span>
           )}
         </div>
@@ -309,7 +333,7 @@ export default function ReadinessCheckin({ userId, onScoreUpdate }: ReadinessChe
                 : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
           }`}
         >
-          {saving ? 'Opslaan...' : saved ? '✓ Opgeslagen' : `Opslaan (${filledCount}/6)`}
+          {saving ? 'Opslaan...' : saved ? '✓ Opgeslagen' : `Opslaan (${filledCount}/5)`}
         </button>
       </div>
     </div>
