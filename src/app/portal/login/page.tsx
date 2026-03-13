@@ -30,8 +30,8 @@ export default function LoginPage() {
     setLoading(true); setMessage('')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) { setIsError(true); setMessage(error.message); setLoading(false); return }
+    router.refresh()
     router.push('/portal/dashboard')
-    setLoading(false)
   }
 
   async function handleRegister() {
