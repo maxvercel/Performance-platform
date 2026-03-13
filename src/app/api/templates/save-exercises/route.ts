@@ -32,7 +32,6 @@ export async function POST(request: Request) {
       weight_kg: number | null
       rest_seconds: number | null
       notes: string | null
-      order_index: number
     }>>
   }
 
@@ -50,72 +49,38 @@ export async function POST(request: Request) {
   if (tmplErr || !tmpl) {
     return NextResponse.json({
       error: `Template niet gevonden: ${tmplErr?.message ?? 'onbekend'}`,
-      debug: { templateId, tmplErr }
     }, { status: 403 })
   }
 
   if (tmpl.coach_id !== user.id) {
-    return NextResponse.json({
-      error: 'Geen toegang tot dit template',
-      debug: { tmplCoachId: tmpl.coach_id, userId: user.id }
-    }, { status: 403 })
+    return NextResponse.json({ error: 'Geen toegang tot dit template' }, { status: 403 })
   }
 
-  // Quick check: verify table is accessible
-  const { error: tableErr } = await supabase
-    .from('template_exercises')
-    .select('id')
-    .limit(1)
-
-  if (tableErr) {
-    return NextResponse.json({
-      success: false,
-      error: `template_exercises niet bereikbaar: ${tableErr.message} (${tableErr.code})`,
-      message: `Tabel error: ${tableErr.message}`,
-    }, { status: 500 })
-  }
-
-  // Save exercises per day
+  // Save exercises per day using RPC function (bypasses PostgREST schema cache)
   let savedCount = 0
   let errorCount = 0
   const errors: string[] = []
 
   for (const [dayId, dayExercises] of Object.entries(exercises)) {
-    // Delete existing exercises for this day
-    const { error: delError } = await supabase
-      .from('template_exercises')
-      .delete()
-      .eq('day_id', dayId)
+    const exercisesJson = dayExercises.map((ex: any) => ({
+      name: String(ex.name ?? '').trim() || 'Unnamed',
+      sets: Number(ex.sets) || 3,
+      reps: String(ex.reps ?? '8-10'),
+      weight_kg: ex.weight_kg != null ? Number(ex.weight_kg) : null,
+      rest_seconds: Number(ex.rest_seconds) || 90,
+      notes: ex.notes ? String(ex.notes) : null,
+    }))
 
-    if (delError) {
-      errors.push(`DELETE ${dayId}: ${delError.message} (${delError.code})`)
+    const { data: count, error: rpcError } = await supabase.rpc('save_template_exercises', {
+      p_day_id: dayId,
+      p_exercises: exercisesJson,
+    })
+
+    if (rpcError) {
+      errors.push(`Day ${dayId}: ${rpcError.message} (${rpcError.code})`)
       errorCount++
-      continue
-    }
-
-    // Insert new exercises
-    if (dayExercises.length > 0) {
-      const rows = dayExercises.map((ex: any, i: number) => ({
-        day_id: dayId,
-        exercise_name: String(ex.name ?? '').trim() || 'Unnamed',
-        sets: Number(ex.sets) || 3,
-        reps: String(ex.reps ?? '8-10'),
-        weight_kg: ex.weight_kg != null ? Number(ex.weight_kg) : null,
-        rest_seconds: Number(ex.rest_seconds) || 90,
-        notes: ex.notes ? String(ex.notes) : null,
-        order_index: i,
-      }))
-
-      const { error: insError } = await supabase
-        .from('template_exercises')
-        .insert(rows)
-
-      if (insError) {
-        errors.push(`INSERT ${dayId} (${rows.length}): ${insError.message} (${insError.code})`)
-        errorCount++
-      } else {
-        savedCount += rows.length
-      }
+    } else {
+      savedCount += (count ?? dayExercises.length)
     }
   }
 

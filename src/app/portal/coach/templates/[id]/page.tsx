@@ -71,16 +71,14 @@ export default function TemplateEditorPage() {
       }))
     setWeeks(sortedWeeks)
 
-    // Load saved exercises separately (avoids PostgREST schema cache issues with new tables)
+    // Load saved exercises via RPC function (bypasses PostgREST schema cache)
     const allDayIds = sortedWeeks.flatMap((w: any) => w.template_days.map((d: any) => d.id))
     const exMap: Record<string, any[]> = {}
 
     if (allDayIds.length > 0) {
-      const { data: savedEx } = await supabase
-        .from('template_exercises')
-        .select('id, day_id, exercise_name, sets, reps, weight_kg, rest_seconds, notes, order_index')
-        .in('day_id', allDayIds)
-        .order('order_index', { ascending: true })
+      const { data: savedEx } = await supabase.rpc('get_template_exercises', {
+        p_day_ids: allDayIds,
+      })
 
       savedEx?.forEach((ex: any) => {
         if (!exMap[ex.day_id]) exMap[ex.day_id] = []
