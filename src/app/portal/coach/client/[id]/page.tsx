@@ -92,7 +92,7 @@ export default function ClientDetail() {
       .select(`id, name, goal, start_date, is_active, created_at,
         program_weeks(id, week_number, label,
           program_days(id, day_number, label, rest_day,
-            program_exercises(id, exercise_id, sets, reps, weight_kg, order_index,
+            program_exercises(id, exercise_id, sets, reps, weight_kg, rest_seconds, notes, superset_group, order_index,
               exercises(id, name, muscle_group)
             )
           )

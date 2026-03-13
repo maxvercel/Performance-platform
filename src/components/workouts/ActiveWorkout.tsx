@@ -263,7 +263,7 @@ export function ActiveWorkout({
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-zinc-600 text-xs font-bold">{globalIdx}</span>
                   <p className="text-white font-bold text-sm">{pe.exercises?.name}</p>
-                  {pe.exercises?.muscle_group && (
+                  {pe.exercises?.muscle_group && pe.exercises.muscle_group !== 'general' && (
                     <span
                       className={`text-xs ${
                         MUSCLE_GROUP_COLORS[pe.exercises.muscle_group] ?? 'text-zinc-500'
