@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { calc1RM } from '@/utils/calculations'
 import { RANK_ORDER, getRank } from '@/utils/constants'
 import { HexBadge, RankLadder, RecordCard } from '@/components/records'
+import { selectInChunks } from '@/lib/supabase/queryHelpers'
 import type { PersonalRecord } from '@/types'
 
 type FilterType = 'all' | 'elite' | 'gold'
@@ -54,20 +55,16 @@ export default function RecordsPage() {
     const wlDateMap: Record<string, string> = {}
     workoutLogs?.forEach(wl => { wlDateMap[wl.id] = wl.logged_at })
 
-    // Step 2: Get all exercise logs for those workouts
-    const { data: logs, error } = await supabase
-      .from('exercise_logs')
-      .select('id, weight_kg, reps_completed, workout_log_id, exercises(id, name, muscle_group)')
-      .in('workout_log_id', wlIds)
-      .not('weight_kg', 'is', null)
+    // Step 2: Get all exercise logs for those workouts (chunked for safety)
+    const logs = await selectInChunks<{
+      id: string; weight_kg: number | null; reps_completed: number | null;
+      workout_log_id: string; exercises: { id: string; name: string; muscle_group: string } | null;
+    }>(
+      supabase, 'exercise_logs', 'id, weight_kg, reps_completed, workout_log_id, exercises(id, name, muscle_group)',
+      'workout_log_id', wlIds, (q) => q.not('weight_kg', 'is', null)
+    )
 
-    if (error) {
-      console.error('Records query error:', error)
-      setLoading(false)
-      return
-    }
-
-    if (!logs || logs.length === 0) {
+    if (logs.length === 0) {
       setLoading(false)
       return
     }
@@ -79,7 +76,7 @@ export default function RecordsPage() {
     const sessionBests: Record<string, Record<string, { weight: number; reps: number; date: string; exName: string; exMuscle: string }>> = {}
 
     logs.forEach((log) => {
-      const ex = log.exercises as unknown as { id: string; name: string; muscle_group: string } | null
+      const ex = log.exercises
       const exId = ex?.id
       if (!exId || !log.weight_kg) return
       const wlId = log.workout_log_id

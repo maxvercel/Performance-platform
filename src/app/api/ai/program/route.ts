@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { createClient as createBrowserClient } from '@/lib/supabase/server'
 import { validateAIProgramRequest } from '@/lib/validation'
 
 // Simple in-memory rate limiter (per-IP, resets on server restart)
@@ -21,8 +22,15 @@ function isRateLimited(ip: string): boolean {
 }
 
 export async function POST(request: Request) {
+  // Authentication check
+  const browserClient = await createBrowserClient()
+  const { data: { user } } = await browserClient.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: 'Niet ingelogd.' }, { status: 401 })
+  }
+
   // Rate limiting
-  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
+  const ip = request.headers.get('x-forwarded-for') ?? user.id
   if (isRateLimited(ip)) {
     return NextResponse.json(
       { error: 'Te veel verzoeken. Probeer het over een minuut opnieuw.' },

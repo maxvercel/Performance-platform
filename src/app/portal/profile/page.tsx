@@ -9,8 +9,10 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { NotificationSettings } from '@/components/ui/NotificationSettings'
 import { ACCENT_COLORS, ROLE_LABELS } from '@/utils/constants'
 import { validateName } from '@/lib/validation'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 
 export default function ProfilePage() {
   const { profile, loading, signOut, refreshProfile } = useAuth()
@@ -21,6 +23,8 @@ export default function ProfilePage() {
   const [saved, setSaved] = useState(false)
   const [fullName, setFullName] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   // Sync fullName when profile loads
   useEffect(() => {
@@ -49,6 +53,40 @@ export default function ProfilePage() {
     setSaving(false)
   }
 
+  async function handleExportData() {
+    setExporting(true)
+    try {
+      const response = await fetch('/api/export')
+      if (!response.ok) {
+        throw new Error('Export mislukt')
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `9tofit-export-${new Date().toISOString().split('T')[0]}.json`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Export error:', error)
+      alert('Exporteren mislukt. Probeer het later opnieuw.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  function handleDeleteAccount() {
+    setShowDeleteConfirm(true)
+  }
+
+  function handleDeleteConfirmed() {
+    setShowDeleteConfirm(false)
+    alert('Neem contact op met je coach om je account te verwijderen')
+  }
+
   if (loading) return <PageSpinner />
 
   const initials = (fullName || profile?.email || '?').charAt(0).toUpperCase()
@@ -57,6 +95,17 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-zinc-950 pb-28">
 
       <PageHeader label="Instellingen" title="Jouw profiel" />
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Account verwijderen?"
+        description="Weet je zeker dat je je account wilt verwijderen? Dit kan niet ongedaan gemaakt worden."
+        confirmText="Ja, verwijderen"
+        cancelText="Annuleren"
+        variant="danger"
+        onConfirm={handleDeleteConfirmed}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
 
       <div className="px-4 py-5 space-y-4">
 
@@ -140,6 +189,9 @@ export default function ProfilePage() {
           </p>
         </Card>
 
+        {/* Notification Settings */}
+        <NotificationSettings />
+
         {/* Account info */}
         <Card className="space-y-3">
           <p className="text-white font-bold">Accountgegevens</p>
@@ -161,6 +213,51 @@ export default function ProfilePage() {
             <p className="text-zinc-500 text-xs">Bekijk al je persoonlijke records</p>
           </div>
           <span className="text-zinc-600">→</span>
+        </Card>
+
+        {/* Data export */}
+        <Card className="space-y-3">
+          <div>
+            <p className="text-white font-bold">Gegevens exporteren</p>
+            <p className="text-zinc-500 text-xs mt-0.5">Download al je data als JSON bestand</p>
+          </div>
+          <Button
+            onClick={handleExportData}
+            disabled={exporting}
+            loading={exporting}
+            fullWidth
+          >
+            {exporting ? 'Downloaden...' : 'Download mijn data'}
+          </Button>
+        </Card>
+
+        {/* Privacy & Data */}
+        <Card className="space-y-3">
+          <div>
+            <p className="text-white font-bold">Privacy & Gegevens</p>
+            <p className="text-zinc-500 text-xs mt-0.5">Je data is veilig bij 9toFit</p>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-start gap-2">
+              <span className="text-orange-500 mt-0.5">•</span>
+              <p className="text-zinc-400 text-xs">Je gegevens worden versleuteld opgeslagen</p>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-orange-500 mt-0.5">•</span>
+              <p className="text-zinc-400 text-xs">Alleen jij en je coach hebben toegang</p>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-orange-500 mt-0.5">•</span>
+              <p className="text-zinc-400 text-xs">Je kunt altijd je data exporteren of verwijderen</p>
+            </div>
+          </div>
+          <Button
+            variant="danger"
+            onClick={handleDeleteAccount}
+            fullWidth
+          >
+            Account verwijderen
+          </Button>
         </Card>
 
         {/* Sign out */}

@@ -6,63 +6,76 @@ import { useRouter } from 'next/navigation'
 import { differenceInDays, addDays, parseISO, subWeeks } from 'date-fns'
 import { PageSpinner } from '@/components/ui'
 import { AddClientForm, ClientCard, ProgramBuilder } from '@/components/coach'
+import { selectInChunks } from '@/lib/supabase/queryHelpers'
+import type { Profile } from '@/types'
+
+interface WorkoutLogRow { client_id: string; logged_at: string }
+interface ProgramRow { id: string; client_id: string; name: string; start_date: string }
+interface MessageRow { sender_id: string; read_at: string | null }
+interface EnrichedClient extends Profile {
+  lastWorkout: string | null
+  activeProgram: ProgramRow | null
+  daysLeft: number | null
+  unread: number
+  sparkline: number[]
+  compliance: number
+}
 
 export default function CoachDashboard() {
   const supabase = createClient()
   const router = useRouter()
-  const [profile, setProfile] = useState<any>(null)
-  const [clients, setClients] = useState<any[]>([])
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [clients, setClients] = useState<EnrichedClient[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'clients' | 'programs'>('clients')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [visibleCount, setVisibleCount] = useState(20)
 
   useEffect(() => { load() }, [])
 
   async function load() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.push('/portal/login'); return }
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { router.push('/portal/login'); return }
 
-    const { data: prof } = await supabase
-      .from('profiles').select('*').eq('id', user.id).single()
+      const { data: prof } = await supabase
+        .from('profiles').select('*').eq('id', user.id).single()
 
-    if (!prof || !['coach', 'admin'].includes(prof.role)) {
-      router.push('/portal/dashboard'); return
-    }
-    setProfile(prof)
+      if (!prof || !['coach', 'admin'].includes(prof.role)) {
+        router.push('/portal/dashboard'); return
+      }
+      setProfile(prof as Profile)
 
-    const { data: relations } = await supabase
-      .from('coach_client')
-      .select('client_id')
-      .eq('coach_id', user.id)
-      .eq('active', true)
+      const { data: relations, error: relErr } = await supabase
+        .from('coach_client')
+        .select('client_id')
+        .eq('coach_id', user.id)
+        .eq('active', true)
 
-    const clientIds = relations?.map(r => r.client_id) ?? []
-    if (clientIds.length === 0) { setLoading(false); return }
+      if (relErr) { setError('Kan clients niet laden.'); setLoading(false); return }
 
-    const fiveWeeksAgo = subWeeks(new Date(), 5).toISOString()
+      const clientIds = relations?.map(r => r.client_id) ?? []
+      if (clientIds.length === 0) { setLoading(false); return }
 
-    const [
-      { data: profiles },
-      { data: workoutLogs },
-      { data: allWorkoutLogs },
-      { data: programs },
-      { data: msgs },
-    ] = await Promise.all([
-      supabase.from('profiles').select('*').in('id', clientIds),
-      supabase.from('workout_logs').select('client_id, logged_at')
-        .in('client_id', clientIds).not('completed_at', 'is', null)
-        .gte('logged_at', fiveWeeksAgo).order('logged_at', { ascending: false }),
-      supabase.from('workout_logs').select('client_id, logged_at')
-        .in('client_id', clientIds).not('completed_at', 'is', null)
-        .order('logged_at', { ascending: false }),
-      supabase.from('programs').select('client_id, name, start_date, id')
-        .in('client_id', clientIds).eq('is_active', true),
-      supabase.from('messages').select('sender_id, read_at')
-        .eq('receiver_id', user.id).is('read_at', null).in('sender_id', clientIds),
-    ])
+      const fiveWeeksAgo = subWeeks(new Date(), 5).toISOString()
+
+      // Use selectInChunks for safe .in() with many client IDs
+      const [profiles, workoutLogs, allWorkoutLogs, programs, msgs] = await Promise.all([
+        selectInChunks<Profile>(supabase, 'profiles', '*', 'id', clientIds),
+        selectInChunks<WorkoutLogRow>(supabase, 'workout_logs', 'client_id, logged_at', 'client_id', clientIds,
+          (q) => q.not('completed_at', 'is', null).gte('logged_at', fiveWeeksAgo).order('logged_at', { ascending: false })),
+        selectInChunks<WorkoutLogRow>(supabase, 'workout_logs', 'client_id, logged_at', 'client_id', clientIds,
+          (q) => q.not('completed_at', 'is', null).order('logged_at', { ascending: false }).limit(500)),
+        selectInChunks<ProgramRow>(supabase, 'programs', 'client_id, name, start_date, id', 'client_id', clientIds,
+          (q) => q.eq('is_active', true)),
+        selectInChunks<MessageRow>(supabase, 'messages', 'sender_id, read_at', 'sender_id', clientIds,
+          (q) => q.eq('coach_id', user.id).is('read_at', null)),
+      ])
 
     // Last workout per client
     const lastWorkout: Record<string, string> = {}
-    allWorkoutLogs?.forEach(log => {
+    allWorkoutLogs.forEach(log => {
       if (!lastWorkout[log.client_id]) lastWorkout[log.client_id] = log.logged_at
     })
 
@@ -70,7 +83,7 @@ export default function CoachDashboard() {
     const sparklineMap: Record<string, number[]> = {}
     clientIds.forEach(id => { sparklineMap[id] = [0, 0, 0, 0, 0] })
     const now = new Date()
-    workoutLogs?.forEach(log => {
+    workoutLogs.forEach(log => {
       const weeksAgo = Math.floor(differenceInDays(now, new Date(log.logged_at)) / 7)
       if (weeksAgo >= 0 && weeksAgo < 5) {
         const idx = 4 - weeksAgo
@@ -80,32 +93,33 @@ export default function CoachDashboard() {
 
     // Program weeks count
     const programWeeksMap: Record<string, number> = {}
-    if (programs && programs.length > 0) {
+    if (programs.length > 0) {
       const programIds = programs.map(p => p.id)
-      const { data: weeks } = await supabase
-        .from('program_weeks').select('program_id').in('program_id', programIds)
+      const weeks = await selectInChunks<{ program_id: string }>(
+        supabase, 'program_weeks', 'program_id', 'program_id', programIds
+      )
       programs.forEach(p => {
-        programWeeksMap[p.id] = weeks?.filter(w => w.program_id === p.id).length ?? 0
+        programWeeksMap[p.id] = weeks.filter(w => w.program_id === p.id).length
       })
     }
 
-    const activeProgram: Record<string, any> = {}
-    programs?.forEach(p => {
+    const activeProgram: Record<string, ProgramRow> = {}
+    programs.forEach(p => {
       if (!activeProgram[p.client_id]) activeProgram[p.client_id] = p
     })
 
     // Unread messages
     const unreadMap: Record<string, number> = {}
-    msgs?.forEach(m => {
+    msgs.forEach(m => {
       unreadMap[m.sender_id] = (unreadMap[m.sender_id] ?? 0) + 1
     })
 
-    const enriched = (profiles ?? []).map(c => {
+    const enriched: EnrichedClient[] = profiles.map(c => {
       const prog = activeProgram[c.id]
       const numWeeks = prog ? programWeeksMap[prog.id] ?? 4 : 4
       const endDate = prog ? addDays(parseISO(prog.start_date), numWeeks * 7) : null
       const daysLeft = endDate ? differenceInDays(endDate, new Date()) : null
-      const recentWorkouts = (sparklineMap[c.id] ?? [0, 0, 0, 0, 0]).slice(1).reduce((a, b) => a + b, 0)
+      const recentWorkouts = (sparklineMap[c.id] ?? [0, 0, 0, 0, 0]).slice(1).reduce((a: number, b: number) => a + b, 0)
       const compliance = Math.min(100, Math.round((recentWorkouts / (3 * 4)) * 100))
 
       return {
@@ -121,10 +135,15 @@ export default function CoachDashboard() {
 
     enriched.sort((a, b) => getUrgencyScore(b) - getUrgencyScore(a))
     setClients(enriched)
-    setLoading(false)
+    } catch (err) {
+      console.error('Coach dashboard load error:', err)
+      setError('Er ging iets mis bij het laden van het dashboard.')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  function getUrgencyScore(client: any) {
+  function getUrgencyScore(client: EnrichedClient) {
     let score = 0
     if (client.unread > 0) score += 100
     if (!client.lastWorkout) score += 50
@@ -137,17 +156,89 @@ export default function CoachDashboard() {
     return score
   }
 
-  function getStatusColor(client: any): 'green' | 'orange' | 'red' {
+  function getStatusColor(client: EnrichedClient): 'green' | 'orange' | 'red' {
     const score = getUrgencyScore(client)
     if (score >= 80) return 'red'
     if (score >= 20) return 'orange'
     return 'green'
   }
 
+  function computeAlerts() {
+    interface Alert {
+      type: 'inactive' | 'program_expiring' | 'low_compliance' | 'no_program'
+      clientId: string
+      clientName: string
+      description: string
+      colorClass: string
+    }
+    const alerts: Alert[] = []
+
+    clients.forEach(client => {
+      // 1. Inactive - hasn't worked out in 4+ days
+      if (client.lastWorkout) {
+        const daysSinceWorkout = differenceInDays(new Date(), new Date(client.lastWorkout))
+        if (daysSinceWorkout >= 4) {
+          alerts.push({
+            type: 'inactive',
+            clientId: client.id,
+            clientName: client.full_name || 'Onbekend',
+            description: `${daysSinceWorkout} ${daysSinceWorkout === 1 ? 'dag' : 'dagen'} inactief`,
+            colorClass: 'border-red-500'
+          })
+        }
+      } else {
+        // Never worked out
+        alerts.push({
+          type: 'inactive',
+          clientId: client.id,
+          clientName: client.full_name || 'Onbekend',
+          description: 'Nog geen workout',
+          colorClass: 'border-red-500'
+        })
+      }
+
+      // 2. Program expiring - expires within 7 days
+      if (client.daysLeft !== null && client.daysLeft > 0 && client.daysLeft <= 7) {
+        alerts.push({
+          type: 'program_expiring',
+          clientId: client.id,
+          clientName: client.full_name || 'Onbekend',
+          description: `Programma loopt af in ${client.daysLeft} ${client.daysLeft === 1 ? 'dag' : 'dagen'}`,
+          colorClass: 'border-orange-500'
+        })
+      }
+
+      // 3. Low compliance - < 40%
+      if (client.compliance < 40) {
+        alerts.push({
+          type: 'low_compliance',
+          clientId: client.id,
+          clientName: client.full_name || 'Onbekend',
+          description: `${client.compliance}% compliance`,
+          colorClass: 'border-yellow-500'
+        })
+      }
+
+      // 4. No program - client has no active program
+      if (!client.activeProgram) {
+        alerts.push({
+          type: 'no_program',
+          clientId: client.id,
+          clientName: client.full_name || 'Onbekend',
+          description: 'Geen actief programma',
+          colorClass: 'border-zinc-600'
+        })
+      }
+    })
+
+    return alerts
+  }
+
   async function addClient(email: string) {
     const { data: clientProfile } = await supabase
       .from('profiles').select('*').eq('email', email).single()
     if (!clientProfile) { alert('Geen gebruiker gevonden.'); return }
+    if (!profile) return
     const { error } = await supabase
       .from('coach_client')
       .insert({ coach_id: profile.id, client_id: clientProfile.id })
@@ -160,6 +251,20 @@ export default function CoachDashboard() {
   const greenClients = clients.filter(c => getStatusColor(c) === 'green').length
 
   if (loading) return <PageSpinner />
+
+  if (error) return (
+    <div className="min-h-screen bg-zinc-950 flex items-center justify-center px-6">
+      <div className="text-center">
+        <p className="text-4xl mb-3">⚠️</p>
+        <p className="text-red-400 font-bold mb-2">Fout bij laden</p>
+        <p className="text-zinc-500 text-sm mb-4">{error}</p>
+        <button onClick={() => { setError(null); setLoading(true); load() }}
+          className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-6 py-2 rounded-xl text-sm transition">
+          Opnieuw proberen
+        </button>
+      </div>
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-zinc-950 pb-24">
@@ -175,13 +280,46 @@ export default function CoachDashboard() {
         </div>
       </div>
 
+      {/* Alerts Section */}
+      {(() => {
+        const alerts = computeAlerts()
+        if (alerts.length === 0) return null
+
+        return (
+          <div className="bg-zinc-900 px-5 py-4 border-b border-zinc-800">
+            <div className="flex items-center gap-3 mb-3">
+              <p className="text-orange-500 text-xs font-bold tracking-widest uppercase">⚠️ Aandacht nodig ({alerts.length})</p>
+            </div>
+            <div className="overflow-x-auto pb-2 -mx-5 px-5">
+              <div className="flex gap-2 w-max">
+                {alerts.map((alert, idx) => (
+                  <button
+                    key={`${alert.clientId}-${alert.type}-${idx}`}
+                    onClick={() => router.push(`/portal/coach/client/${alert.clientId}`)}
+                    className={`flex-shrink-0 bg-zinc-900 border-l-4 ${alert.colorClass} rounded-lg px-3 py-2
+                                 hover:bg-zinc-800 transition cursor-pointer min-w-max`}
+                  >
+                    <p className="text-white text-sm font-semibold truncate max-w-xs">
+                      {alert.clientName}
+                    </p>
+                    <p className="text-zinc-400 text-xs truncate max-w-xs">
+                      {alert.description}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Tabs */}
       <div className="flex bg-zinc-900 border-b border-zinc-800" role="tablist">
         {[
           { key: 'clients', label: '👥 Clients' },
           { key: 'programs', label: '📋 Programma Builder' },
         ].map(tab => (
-          <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
+          <button key={tab.key} onClick={() => setActiveTab(tab.key as 'clients' | 'programs')}
             role="tab"
             aria-selected={activeTab === tab.key}
             className={`flex-1 py-3 text-sm font-semibold transition border-b-2 ${
@@ -203,16 +341,49 @@ export default function CoachDashboard() {
                 <p className="text-zinc-400 text-sm">Nog geen clients toegevoegd</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {clients.map(client => (
-                  <ClientCard
-                    key={client.id}
-                    client={client}
-                    statusColor={getStatusColor(client)}
-                    onClick={() => router.push(`/portal/coach/client/${client.id}`)}
+              <>
+                {/* Search */}
+                {clients.length > 10 && (
+                  <input
+                    type="text"
+                    placeholder="Zoek client..."
+                    value={searchQuery}
+                    onChange={e => { setSearchQuery(e.target.value); setVisibleCount(20) }}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3
+                               text-white text-sm placeholder-zinc-500 focus:outline-none focus:border-orange-500"
                   />
-                ))}
-              </div>
+                )}
+                {(() => {
+                  const filtered = searchQuery
+                    ? clients.filter(c => c.full_name?.toLowerCase().includes(searchQuery.toLowerCase()))
+                    : clients
+                  const visible = filtered.slice(0, visibleCount)
+                  const hasMore = filtered.length > visibleCount
+                  return (
+                    <>
+                      <div className="space-y-3">
+                        {visible.map(client => (
+                          <ClientCard
+                            key={client.id}
+                            client={client}
+                            statusColor={getStatusColor(client)}
+                            onClick={() => router.push(`/portal/coach/client/${client.id}`)}
+                          />
+                        ))}
+                      </div>
+                      {hasMore && (
+                        <button
+                          onClick={() => setVisibleCount(prev => prev + 20)}
+                          className="w-full py-3 bg-zinc-900 border border-zinc-800 rounded-2xl text-zinc-400
+                                     hover:text-white hover:border-orange-500/40 font-bold text-sm transition"
+                        >
+                          Meer laden ({filtered.length - visibleCount} overig)
+                        </button>
+                      )}
+                    </>
+                  )
+                })()}
+              </>
             )}
 
             {/* Coach tools */}
@@ -241,7 +412,7 @@ export default function CoachDashboard() {
                 Ga naar AI →
               </button>
             </div>
-            <ProgramBuilder coachId={profile.id} clients={clients} />
+            <ProgramBuilder coachId={profile!.id} clients={clients as Array<{ id: string; full_name: string }>} />
           </>
         )}
       </div>

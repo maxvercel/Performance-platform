@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter, useParams } from 'next/navigation'
 import { parseISO, format, differenceInDays } from 'date-fns'
 import { nl } from 'date-fns/locale'
+import { selectInChunks } from '@/lib/supabase/queryHelpers'
 
 export default function ClientDetail() {
   const supabase = createClient()
@@ -67,14 +68,13 @@ export default function ClientDetail() {
 
     if (workoutLogs && workoutLogs.length > 0) {
       const logIds = workoutLogs.map(l => l.id)
-      const { data: exLogs } = await supabase
-        .from('exercise_logs')
-        .select('workout_log_id, weight_kg, reps_completed')
-        .in('workout_log_id', logIds)
+      const exLogs = await selectInChunks<{ workout_log_id: string; weight_kg: number | null; reps_completed: number | null }>(
+        supabase, 'exercise_logs', 'workout_log_id, weight_kg, reps_completed', 'workout_log_id', logIds
+      )
 
       const volumeMap: Record<string, number> = {}
       const setsMap: Record<string, number> = {}
-      exLogs?.forEach((el: any) => {
+      exLogs.forEach((el) => {
         volumeMap[el.workout_log_id] = (volumeMap[el.workout_log_id] ?? 0) + ((el.weight_kg ?? 0) * (el.reps_completed ?? 0))
         setsMap[el.workout_log_id] = (setsMap[el.workout_log_id] ?? 0) + 1
       })
@@ -103,15 +103,14 @@ export default function ClientDetail() {
 
     if (progs) {
       const progIds = progs.map(p => p.id)
-      const { data: wLogs } = await supabase
-        .from('workout_logs')
-        .select('program_id, completed_at, day_id')
-        .in('program_id', progIds)
-        .not('completed_at', 'is', null)
+      const wLogs = await selectInChunks<{ program_id: string; completed_at: string | null; day_id: string | null }>(
+        supabase, 'workout_logs', 'program_id, completed_at, day_id', 'program_id', progIds,
+        (q) => q.not('completed_at', 'is', null)
+      )
 
       const countMap: Record<string, number> = {}
       const completedDaysMap: Record<string, Set<string>> = {}
-      wLogs?.forEach((l: any) => {
+      wLogs.forEach((l) => {
         countMap[l.program_id] = (countMap[l.program_id] ?? 0) + 1
         if (!completedDaysMap[l.program_id]) completedDaysMap[l.program_id] = new Set()
         if (l.day_id) completedDaysMap[l.program_id].add(l.day_id)
@@ -190,19 +189,21 @@ export default function ClientDetail() {
       logDateMap[w.id] = w.logged_at
     })
 
-    // Get all exercise_logs for these workouts
-    const { data: eLogs } = await supabase
-      .from('exercise_logs')
-      .select('workout_log_id, exercise_id, set_number, weight_kg, reps_completed, rpe')
-      .in('workout_log_id', wLogIds)
-      .order('set_number', { ascending: true })
+    // Get all exercise_logs for these workouts (safe chunking for large programs)
+    const eLogs = await selectInChunks<{
+      workout_log_id: string; exercise_id: string; set_number: number;
+      weight_kg: number | null; reps_completed: number | null; rpe: number | null;
+    }>(
+      supabase, 'exercise_logs', 'workout_log_id, exercise_id, set_number, weight_kg, reps_completed, rpe',
+      'workout_log_id', wLogIds, (q) => q.order('set_number', { ascending: true })
+    )
 
     // Group by day_id -> exercise_id -> sets
-    const byDay: Record<string, any[]> = {}
+    const byDay: Record<string, Array<{ workout_log_id: string; exercise_id: string; set_number: number; weight_kg: number | null; reps_completed: number | null; rpe: number | null; logged_at: string }>> = {}
     const logToDayMap: Record<string, string> = {}
     wLogs.forEach(w => { if (w.day_id) logToDayMap[w.id] = w.day_id })
 
-    eLogs?.forEach((el: any) => {
+    eLogs.forEach((el) => {
       const dayId = logToDayMap[el.workout_log_id]
       if (!dayId) return
       if (!byDay[dayId]) byDay[dayId] = []
@@ -234,15 +235,16 @@ export default function ClientDetail() {
     const dateMap: Record<string, string> = {}
     wLogs.forEach(w => { dateMap[w.id] = w.logged_at })
 
-    const { data: eLogs } = await supabase
-      .from('exercise_logs')
-      .select('workout_log_id, set_number, weight_kg, reps_completed, rpe')
-      .eq('exercise_id', exerciseId)
-      .in('workout_log_id', wLogIds)
-      .order('set_number', { ascending: true })
+    const eLogs = await selectInChunks<{
+      workout_log_id: string; set_number: number; weight_kg: number | null;
+      reps_completed: number | null; rpe: number | null;
+    }>(
+      supabase, 'exercise_logs', 'workout_log_id, set_number, weight_kg, reps_completed, rpe',
+      'workout_log_id', wLogIds, (q) => q.eq('exercise_id', exerciseId).order('set_number', { ascending: true })
+    )
 
-    const byDate: Record<string, { date: string; sets: any[] }> = {}
-    eLogs?.forEach((el: any) => {
+    const byDate: Record<string, { date: string; sets: Array<{ workout_log_id: string; set_number: number; weight_kg: number | null; reps_completed: number | null; rpe: number | null }> }> = {}
+    eLogs.forEach((el) => {
       const date = dateMap[el.workout_log_id]?.split('T')[0] ?? 'unknown'
       if (!byDate[date]) byDate[date] = { date, sets: [] }
       byDate[date].sets.push(el)
@@ -280,12 +282,16 @@ export default function ClientDetail() {
       return
     }
 
-    // Also unlink any workout_logs that reference day_ids from this program but may have program_id=null already
+    // Also unlink any workout_logs that reference day_ids from this program
+    // Use chunking for safety with large programs
     if (allDayIds.length > 0) {
-      await supabase
-        .from('workout_logs')
-        .update({ day_id: null })
-        .in('day_id', allDayIds)
+      const CHUNK = 80
+      for (let i = 0; i < allDayIds.length; i += CHUNK) {
+        await supabase
+          .from('workout_logs')
+          .update({ day_id: null })
+          .in('day_id', allDayIds.slice(i, i + CHUNK))
+      }
     }
 
     // Now delete the program (cascades to weeks -> days -> exercises)

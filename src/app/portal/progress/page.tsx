@@ -26,6 +26,7 @@ import { BodyMap } from '@/components/ui/BodyMap'
 
 import type { WorkoutLog, ExerciseLog } from '@/types'
 import { compressImage } from '@/utils/imageCompression'
+import { selectInChunks } from '@/lib/supabase/queryHelpers'
 
 type Tab = 'kracht' | 'cardio' | 'programmas' | 'fotos'
 
@@ -249,14 +250,13 @@ export default function ProgressPage() {
     if (!programs) return
 
     const programIds = programs.map(p => p.id)
-    const { data: workoutLogs } = await supabase
-      .from('workout_logs')
-      .select('program_id, completed_at')
-      .in('program_id', programIds)
-      .not('completed_at', 'is', null)
+    const workoutLogs = await selectInChunks<{ program_id: string; completed_at: string }>(
+      supabase, 'workout_logs', 'program_id, completed_at', 'program_id', programIds,
+      (q) => q.not('completed_at', 'is', null)
+    )
 
     const workoutCountMap: Record<string, number> = {}
-    workoutLogs?.forEach(log => {
+    workoutLogs.forEach(log => {
       workoutCountMap[log.program_id] = (workoutCountMap[log.program_id] ?? 0) + 1
     })
 

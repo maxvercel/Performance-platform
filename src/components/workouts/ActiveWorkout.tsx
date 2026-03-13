@@ -11,7 +11,7 @@ import { ExerciseIllustration } from './ExerciseIllustration'
 import { MUSCLE_GROUP_COLORS } from '@/utils/constants'
 import { getTrainingRecommendation } from '@/utils/autoAdjust'
 
-type SetLog = { weight: string; reps: string; rpe: string; done: boolean }
+type SetLog = { weight: string; reps: string; rpe: string; done: boolean; notes?: string; is_warmup?: boolean }
 
 interface PreviousLog {
   weight_kg: number | null
@@ -34,7 +34,7 @@ interface ActiveWorkoutProps {
   totalSets: number
   feeling: number
   saving: boolean
-  onSetChange: (peId: string, setIndex: number, field: 'weight' | 'reps' | 'rpe', value: string) => void
+  onSetChange: (peId: string, setIndex: number, field: 'weight' | 'reps' | 'rpe' | 'notes', value: string) => void
   onToggleSet: (peId: string, setIndex: number) => void
   onFeelingChange: (value: number) => void
   onFinish: () => void
@@ -94,6 +94,7 @@ export function ActiveWorkout({
   adjustmentReasons = {},
 }: ActiveWorkoutProps) {
   const [showWarmup, setShowWarmup] = useState<Record<string, boolean>>({})
+  const [expandedNotes, setExpandedNotes] = useState<Record<string, Set<number>>>({})
 
   // Group exercises by superset
   const groupedExercises = useMemo(() => {
@@ -282,9 +283,30 @@ export function ActiveWorkout({
                     </span>
                   )}
                 </div>
-                {allDone && (
-                  <span className="text-green-400 text-sm font-bold flex-shrink-0">✓ Klaar</span>
-                )}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {prev && !allDone && (
+                    <button
+                      onClick={() => {
+                        sets.forEach((_, si) => {
+                          if (!sets[si].done) {
+                            onSetChange(pe.id, si, 'weight', (prev?.weight_kg?.toString() ?? '').toString())
+                            if (prev?.reps_completed) {
+                              onSetChange(pe.id, si, 'reps', prev.reps_completed?.toString() ?? '')
+                            }
+                          }
+                        })
+                      }}
+                      className="text-xs bg-blue-500/10 text-blue-400 px-2 py-1 rounded-lg
+                                 border border-blue-500/20 hover:bg-blue-500/20 transition font-bold"
+                      title="Kopieer gegevens van vorige sessie"
+                    >
+                      📋 Vorige
+                    </button>
+                  )}
+                  {allDone && (
+                    <span className="text-green-400 text-sm font-bold">✓ Klaar</span>
+                  )}
+                </div>
               </div>
 
               {/* Tempo */}
@@ -400,6 +422,7 @@ export function ActiveWorkout({
                 {sets.map((set, si) => {
                   const currentWeight = parseFloat(set.weight)
                   const isSuggested = hasSuggestion && currentWeight === suggestion
+                  const notesExpanded = expandedNotes[pe.id]?.has(si) ?? false
 
                   return (
                     <div key={si} className="space-y-1">
@@ -443,6 +466,28 @@ export function ActiveWorkout({
                         />
                         <span className="text-zinc-600 text-xs">reps</span>
                         <button
+                          onClick={() => {
+                            setExpandedNotes(prev => {
+                              const newSet = new Set(prev[pe.id] ?? [])
+                              if (newSet.has(si)) {
+                                newSet.delete(si)
+                              } else {
+                                newSet.add(si)
+                              }
+                              return { ...prev, [pe.id]: newSet }
+                            })
+                          }}
+                          aria-label={`Notities voor set ${si + 1}`}
+                          className={`w-9 h-9 rounded-lg flex items-center justify-center transition text-sm ${
+                            notesExpanded || set.notes
+                              ? 'bg-blue-500/20 text-blue-400'
+                              : 'bg-zinc-700 text-zinc-600 hover:bg-zinc-600'
+                          }`}
+                          title="Voeg notities toe"
+                        >
+                          💬
+                        </button>
+                        <button
                           onClick={() => onToggleSet(pe.id, si)}
                           aria-label={set.done ? `Set ${si + 1} ongedaan maken` : `Set ${si + 1} voltooien`}
                           className={`ml-auto w-11 h-11 rounded-xl flex items-center justify-center
@@ -455,6 +500,21 @@ export function ActiveWorkout({
                           ✓
                         </button>
                       </div>
+
+                      {/* Notes input — shown when expanded */}
+                      {notesExpanded && (
+                        <div className="ml-8 bg-blue-500/5 border border-blue-500/10 rounded-lg px-3 py-2">
+                          <input
+                            type="text"
+                            value={set.notes ?? ''}
+                            onChange={e => onSetChange(pe.id, si, 'notes', e.target.value)}
+                            placeholder="bijv. pijn in schouder, makkelijk..."
+                            className="w-full bg-zinc-700 border border-zinc-600 rounded-lg px-2 py-1.5 text-white text-xs
+                                       focus:outline-none focus:border-blue-500 transition"
+                          />
+                        </div>
+                      )}
+
                       {/* RPE selector — shown after set is completed */}
                       {set.done && (
                         <div className="flex items-center gap-1.5 ml-8">

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useParams } from 'next/navigation'
+import { selectInChunks } from '@/lib/supabase/queryHelpers'
 
 export default function TemplateEditorPage() {
   const supabase = createClient()
@@ -103,14 +104,13 @@ export default function TemplateEditorPage() {
       .select('client_id')
       .eq('coach_id', user.id)
       .eq('active', true)
-    const clientIds = (relations ?? []).map((r: any) => r.client_id)
+    const clientIds = (relations ?? []).map((r: { client_id: string }) => r.client_id)
     if (clientIds.length > 0) {
-      const { data: clientList } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .in('id', clientIds)
-        .order('full_name')
-      setClients(clientList ?? [])
+      const clientList = await selectInChunks<{ id: string; full_name: string }>(
+        supabase, 'profiles', 'id, full_name', 'id', clientIds,
+        (q) => q.order('full_name')
+      )
+      setClients(clientList)
     }
 
     setLoading(false)

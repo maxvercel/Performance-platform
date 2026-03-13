@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { format, parseISO, subDays, addDays } from 'date-fns'
 import { nl } from 'date-fns/locale'
@@ -25,6 +25,26 @@ interface DailyTarget {
   protein_g: number
   carbs_g: number
   fat_g: number
+}
+
+interface FoodSearchResult {
+  name: string
+  brand: string
+  calories: number | null
+  protein_g: number | null
+  carbs_g: number | null
+  fat_g: number | null
+  image: string | null
+}
+
+interface RecentItem {
+  name: string
+  brand: string
+  calories: number | null
+  protein_g: number | null
+  carbs_g: number | null
+  fat_g: number | null
+  image: string | null
 }
 
 const DEFAULT_TARGETS: DailyTarget = {
@@ -69,6 +89,16 @@ export default function NutritionPage() {
   const [saving, setSaving] = useState(false)
   const [showTargetModal, setShowTargetModal] = useState(false)
 
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<FoodSearchResult[]>([])
+  const [recentItems, setRecentItems] = useState<RecentItem[]>([])
+  const [searching, setSearching] = useState(false)
+  const [showPortionModal, setShowPortionModal] = useState(false)
+  const [selectedSearchItem, setSelectedSearchItem] = useState<FoodSearchResult | null>(null)
+  const [portionSize, setPortionSize] = useState('100')
+  const searchDebounceTimer = useRef<NodeJS.Timeout | null>(null)
+
   const [form, setForm] = useState({
     name: '',
     calories: '',
@@ -81,6 +111,41 @@ export default function NutritionPage() {
     if (authLoading || !profile) return
     loadMeals()
   }, [authLoading, profile?.id, selectedDate])
+
+  useEffect(() => {
+    // Load recent items from localStorage
+    const stored = localStorage.getItem('nutrition_recent_items')
+    if (stored) {
+      try {
+        setRecentItems(JSON.parse(stored))
+      } catch (e) {
+        console.error('Failed to load recent items:', e)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    // Debounced search
+    if (searchDebounceTimer.current) {
+      clearTimeout(searchDebounceTimer.current)
+    }
+
+    if (!searchQuery.trim()) {
+      setSearchResults([])
+      return
+    }
+
+    setSearching(true)
+    searchDebounceTimer.current = setTimeout(() => {
+      performSearch(searchQuery)
+    }, 300)
+
+    return () => {
+      if (searchDebounceTimer.current) {
+        clearTimeout(searchDebounceTimer.current)
+      }
+    }
+  }, [searchQuery])
 
   async function loadMeals() {
     if (!profile) return
@@ -158,6 +223,64 @@ export default function NutritionPage() {
   async function deleteMeal(id: string) {
     await supabase.from('nutrition_logs').delete().eq('id', id)
     setMeals(prev => prev.filter(m => m.id !== id))
+  }
+
+  async function performSearch(query: string) {
+    try {
+      const response = await fetch(`/api/nutrition/search?q=${encodeURIComponent(query)}`)
+      const data = await response.json()
+      setSearchResults(data.results || [])
+    } catch (error) {
+      console.error('Search failed:', error)
+      setSearchResults([])
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  function addRecentItem(item: FoodSearchResult) {
+    const updated = [
+      item,
+      ...recentItems.filter(r => r.name !== item.name)
+    ].slice(0, 10)
+    setRecentItems(updated)
+    localStorage.setItem('nutrition_recent_items', JSON.stringify(updated))
+  }
+
+  async function addSearchItem(item: FoodSearchResult) {
+    if (!profile) return
+
+    addRecentItem(item)
+
+    const portion = parseInt(portionSize) || 100
+    const multiplier = portion / 100
+
+    const calories = item.calories ? Math.round(item.calories * multiplier) : null
+    const protein = item.protein_g ? Math.round(item.protein_g * multiplier * 10) / 10 : null
+    const carbs = item.carbs_g ? Math.round(item.carbs_g * multiplier * 10) / 10 : null
+    const fat = item.fat_g ? Math.round(item.fat_g * multiplier * 10) / 10 : null
+
+    const itemName = portion === 100 ? item.name : `${item.name} (${portion}g)`
+
+    setSaving(true)
+    await supabase.from('nutrition_logs').insert({
+      client_id: profile.id,
+      date: selectedDate,
+      meal_type: addMealType,
+      name: itemName,
+      calories,
+      protein_g: protein,
+      carbs_g: carbs,
+      fat_g: fat,
+    })
+
+    setPortionSize('100')
+    setSelectedSearchItem(null)
+    setShowPortionModal(false)
+    setSearchQuery('')
+    setSearchResults([])
+    await loadMeals()
+    setSaving(false)
   }
 
   async function saveTargets() {
@@ -392,6 +515,101 @@ export default function NutritionPage() {
             </div>
 
             <div className="overflow-y-auto max-h-[60vh]">
+              {/* Search Database */}
+              <div className="p-4 border-b border-zinc-800">
+                <p className="text-zinc-500 text-xs font-bold uppercase mb-3">Zoeken in database</p>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Zoek voeding..."
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 pl-9 text-white text-sm placeholder-zinc-600 focus:outline-none focus:border-orange-500"
+                  />
+                  <svg
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
+
+                {searching && (
+                  <div className="mt-3 text-center text-zinc-500 text-xs">Zoeken...</div>
+                )}
+
+                {/* Recent items */}
+                {!searchQuery && recentItems.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-zinc-600 text-xs font-bold mb-2">Recent gebruikt</p>
+                    <div className="space-y-2">
+                      {recentItems.map((item, idx) => (
+                        <button
+                          key={`${item.name}-${idx}`}
+                          onClick={() => {
+                            setSelectedSearchItem(item)
+                            setShowPortionModal(true)
+                          }}
+                          disabled={saving}
+                          className="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl p-2.5 transition"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <p className="text-white text-sm font-medium">{item.name}</p>
+                              <p className="text-zinc-600 text-xs">{item.brand}</p>
+                              <div className="flex gap-2 mt-1">
+                                {item.calories != null && <span className="text-zinc-500 text-xs">{Math.round(item.calories)} kcal</span>}
+                                {item.protein_g != null && <span className="text-blue-400/60 text-xs">E{Math.round(item.protein_g * 10) / 10}g</span>}
+                              </div>
+                            </div>
+                            {item.image && (
+                              <img src={item.image} alt={item.name} className="w-12 h-12 rounded-lg object-cover ml-2" />
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Search results */}
+                {searchQuery && searchResults.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {searchResults.map((item, idx) => (
+                      <button
+                        key={`${item.name}-${idx}`}
+                        onClick={() => {
+                          setSelectedSearchItem(item)
+                          setShowPortionModal(true)
+                        }}
+                        disabled={saving}
+                        className="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl p-2.5 transition"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <p className="text-white text-sm font-medium">{item.name}</p>
+                            <p className="text-zinc-600 text-xs">{item.brand}</p>
+                            <div className="flex gap-2 mt-1">
+                              {item.calories != null && <span className="text-zinc-500 text-xs">{Math.round(item.calories)} kcal/100g</span>}
+                              {item.protein_g != null && <span className="text-blue-400/60 text-xs">E{Math.round(item.protein_g * 10) / 10}g</span>}
+                            </div>
+                          </div>
+                          {item.image && (
+                            <img src={item.image} alt={item.name} className="w-12 h-12 rounded-lg object-cover ml-2" />
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {searchQuery && !searching && searchResults.length === 0 && (
+                  <div className="mt-3 text-center text-zinc-600 text-xs">Geen resultaten gevonden</div>
+                )}
+              </div>
+
               <div className="p-4">
                 <p className="text-zinc-500 text-xs font-bold uppercase mb-2">Snel toevoegen</p>
                 <div className="grid grid-cols-2 gap-2">
@@ -439,6 +657,82 @@ export default function NutritionPage() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Portion Size Modal */}
+      {showPortionModal && selectedSearchItem && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowPortionModal(false) }}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5"
+            style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom, 0px))' }}>
+            <h3 className="text-white font-bold text-lg mb-4">Portiegrootte</h3>
+            <div className="space-y-3 mb-5">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-white text-sm font-medium">{selectedSearchItem.name}</p>
+                  {selectedSearchItem.image && (
+                    <img src={selectedSearchItem.image} alt={selectedSearchItem.name} className="w-12 h-12 rounded-lg object-cover" />
+                  )}
+                </div>
+                <p className="text-zinc-600 text-xs mb-3">{selectedSearchItem.brand}</p>
+
+                <label className="text-zinc-400 text-xs font-bold mb-2 block">Gram per portie</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    value={portionSize}
+                    onChange={e => setPortionSize(e.target.value)}
+                    className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500"
+                  />
+                  <span className="text-zinc-500 text-xs font-bold">g</span>
+                </div>
+
+                {/* Macro preview */}
+                <div className="mt-4 p-3 bg-zinc-800 rounded-xl">
+                  <p className="text-zinc-500 text-xs font-bold mb-2">Per portie ({portionSize}g):</p>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {selectedSearchItem.calories != null && (
+                      <div>
+                        <span className="text-zinc-600">Calorieën:</span>
+                        <p className="text-white font-bold">{Math.round((selectedSearchItem.calories / 100) * parseInt(portionSize))} kcal</p>
+                      </div>
+                    )}
+                    {selectedSearchItem.protein_g != null && (
+                      <div>
+                        <span className="text-blue-400/60">Eiwit:</span>
+                        <p className="text-white font-bold">{Math.round((selectedSearchItem.protein_g / 100) * parseInt(portionSize) * 10) / 10}g</p>
+                      </div>
+                    )}
+                    {selectedSearchItem.carbs_g != null && (
+                      <div>
+                        <span className="text-orange-400/60">Koolhydraten:</span>
+                        <p className="text-white font-bold">{Math.round((selectedSearchItem.carbs_g / 100) * parseInt(portionSize) * 10) / 10}g</p>
+                      </div>
+                    )}
+                    {selectedSearchItem.fat_g != null && (
+                      <div>
+                        <span className="text-yellow-400/60">Vet:</span>
+                        <p className="text-white font-bold">{Math.round((selectedSearchItem.fat_g / 100) * parseInt(portionSize) * 10) / 10}g</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button onClick={() => setShowPortionModal(false)}
+                className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-2.5 rounded-xl transition text-sm">
+                Annuleren
+              </button>
+              <button onClick={() => addSearchItem(selectedSearchItem)} disabled={saving}
+                className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl transition text-sm">
+                {saving ? 'Toevoegen...' : 'Toevoegen'}
+              </button>
             </div>
           </div>
         </div>

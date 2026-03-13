@@ -36,6 +36,46 @@ export default function MessagesPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // Realtime subscription for new messages
+  useEffect(() => {
+    if (!userId || !coachId) return
+
+    const channel = supabase
+      .channel(`messages:${userId}:${coachId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `client_id=eq.${userId}`,
+        },
+        (payload) => {
+          const newMsg = payload.new as ChatMessage
+          // Only add if it's for this conversation and not already in state
+          if (newMsg.coach_id === coachId) {
+            setMessages(prev => {
+              if (prev.some(m => m.id === newMsg.id)) return prev
+              return [...prev, newMsg]
+            })
+            // Auto-mark as read if from coach
+            if (newMsg.sender_id === coachId) {
+              supabase
+                .from('messages')
+                .update({ read_at: new Date().toISOString() })
+                .eq('id', newMsg.id)
+                .then()
+            }
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [userId, coachId])
+
   async function load() {
     try {
       const { data: { user }, error: authError } = await supabase.auth.getUser()

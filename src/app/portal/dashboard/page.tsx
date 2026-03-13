@@ -24,33 +24,72 @@ export default function DashboardPage() {
   const [dataLoading, setDataLoading] = useState(true)
   const [weightData, setWeightData] = useState<ProgressMetric[]>([])
   const [todayHabits, setTodayHabits] = useState({ completed: 0, total: 0 })
-  const [activeProgram, setActiveProgram] = useState<{ name: string; end_date: string | null } | null>(null)
+  const [todayHabitsList, setTodayHabitsList] = useState<Array<{ id: string; name: string; icon: string | null; completed: boolean }>>(
+    []
+  )
+  const [activeProgram, setActiveProgram] = useState<{ name: string; end_date: string | null; id: string } | null>(null)
   const [lastWorkout, setLastWorkout] = useState<string | null>(null)
   const [streak, setStreak] = useState(0)
+  const [dailyHabitStreak, setDailyHabitStreak] = useState(0)
   const [readinessScore, setReadinessScore] = useState<number | null>(null)
+  const [nextProgramDay, setNextProgramDay] = useState<{ day_number: number; name: string } | null>(null)
 
   const loadDashboardData = useCallback(async () => {
     if (!userId) return
 
     try {
       // Parallel data fetching — ~3x faster than sequential
-      const [weights, habits, program, workoutLogs] = await Promise.all([
+      const [weights, habits, program, workoutLogs, habitsListData] = await Promise.all([
         progressService.getWeightHistory(userId),
         habitService.getTodayStats(userId),
         supabase
           .from('programs')
-          .select('name, end_date')
+          .select('id, name, end_date')
           .eq('client_id', userId)
           .eq('is_active', true)
           .limit(1)
           .single()
           .then(({ data }) => data),
         progressService.getCompletedWorkouts(userId),
+        // Fetch today's habits with completion status
+        supabase
+          .from('habits')
+          .select('id, name, icon, habit_logs(completed)')
+          .eq('client_id', userId)
+          .eq('active', true)
+          .then(async ({ data: habitsData, error }) => {
+            if (error || !habitsData) return []
+            const today = format(new Date(), 'yyyy-MM-dd')
+            return habitsData.map(habit => {
+              const log = (habit.habit_logs as any[])?.[0]
+              return {
+                id: habit.id,
+                name: habit.name,
+                icon: habit.icon,
+                completed: log?.completed ?? false,
+              }
+            })
+          }),
       ])
 
       setWeightData(weights)
       setTodayHabits(habits)
       setActiveProgram(program)
+      setTodayHabitsList(habitsListData)
+
+      // Fetch next unfinished day from active program
+      if (program?.id) {
+        const { data: days } = await supabase
+          .from('program_days')
+          .select('day_number, name')
+          .eq('program_id', program.id)
+          .eq('completed', false)
+          .order('day_number', { ascending: true })
+          .limit(1)
+        if (days && days.length > 0) {
+          setNextProgramDay(days[0])
+        }
+      }
 
       if (workoutLogs.length > 0) {
         setLastWorkout(workoutLogs[0].logged_at)
@@ -69,6 +108,55 @@ export default function DashboardPage() {
         }
         setStreak(streakCount)
       }
+
+      // Calculate daily habit streak (consecutive days with 100% habits completed)
+      if (userId) {
+        const { data: habitLogs, error: habitsError } = await supabase
+          .from('habit_logs')
+          .select('date, habit_id')
+          .eq('client_id', userId)
+          .eq('completed', true)
+          .order('date', { ascending: false })
+
+        if (!habitsError && habitLogs) {
+          const { data: totalHabits } = await supabase
+            .from('habits')
+            .select('id')
+            .eq('client_id', userId)
+            .eq('active', true)
+
+          const habitCount = totalHabits?.length ?? 0
+          if (habitCount > 0) {
+            // Group logs by date and count completed habits per day
+            const habitsByDate = new Map<string, Set<string>>()
+            habitLogs.forEach(log => {
+              if (!habitsByDate.has(log.date)) {
+                habitsByDate.set(log.date, new Set())
+              }
+              habitsByDate.get(log.date)!.add(log.habit_id)
+            })
+
+            // Find consecutive days with 100% completion
+            let dailyStreak = 0
+            let checkDate = new Date()
+            checkDate.setHours(0, 0, 0, 0)
+
+            while (true) {
+              const dateStr = format(checkDate, 'yyyy-MM-dd')
+              const completedCount = habitsByDate.get(dateStr)?.size ?? 0
+
+              if (completedCount === habitCount) {
+                dailyStreak++
+                checkDate.setDate(checkDate.getDate() - 1)
+              } else {
+                break
+              }
+            }
+
+            setDailyHabitStreak(dailyStreak)
+          }
+        }
+      }
     } catch (error) {
       console.error('Dashboard data loading error:', error)
     } finally {
@@ -79,6 +167,40 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!authLoading && userId) loadDashboardData()
   }, [authLoading, userId, loadDashboardData])
+
+  /** Toggle a habit's completion status */
+  const toggleHabit = useCallback(
+    async (habitId: string, currentCompleted: boolean) => {
+      if (!userId) return
+
+      try {
+        const today = format(new Date(), 'yyyy-MM-dd')
+        if (currentCompleted) {
+          // Delete the log
+          await supabase.from('habit_logs').delete().eq('habit_id', habitId).eq('date', today)
+        } else {
+          // Upsert a completed log
+          await supabase.from('habit_logs').upsert(
+            {
+              habit_id: habitId,
+              client_id: userId,
+              date: today,
+              completed: true,
+            },
+            { onConflict: 'habit_id, date' }
+          )
+        }
+
+        // Update local state
+        setTodayHabitsList(prev =>
+          prev.map(h => (h.id === habitId ? { ...h, completed: !currentCompleted } : h))
+        )
+      } catch (error) {
+        console.error('Error toggling habit:', error)
+      }
+    },
+    [userId, supabase]
+  )
 
   /** Refresh weight chart after logging */
   const handleWeightSaved = useCallback(async () => {
@@ -169,6 +291,64 @@ export default function DashboardPage() {
             )}
           </Card>
         </div>
+
+        {/* Start training CTA */}
+        {activeProgram && (
+          <button
+            onClick={() => router.push('/portal/workouts')}
+            className="w-full bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-bold py-3 px-4 rounded-2xl transition flex items-center justify-between"
+          >
+            <div className="flex flex-col items-start">
+              <span className="text-base">Start training →</span>
+              {nextProgramDay && (
+                <span className="text-xs text-orange-100 mt-0.5">Dag {nextProgramDay.day_number}: {nextProgramDay.name}</span>
+              )}
+            </div>
+          </button>
+        )}
+
+        {/* Inline today's habits */}
+        {todayHabitsList.length > 0 && (
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <p className="text-white font-bold text-sm">Vandaag's gewoontes</p>
+                {dailyHabitStreak >= 3 && (
+                  <span className="text-base">🔥</span>
+                )}
+              </div>
+              <button onClick={() => router.push('/portal/habits')} className="text-orange-500 text-xs font-bold hover:text-orange-400">
+                Alle habits →
+              </button>
+            </div>
+            {dailyHabitStreak > 0 && (
+              <p className="text-zinc-500 text-xs mb-2">
+                {dailyHabitStreak} dag{dailyHabitStreak !== 1 ? 'en' : ''} op rij 100% voltooid
+              </p>
+            )}
+            <div className="space-y-2">
+              {todayHabitsList.map(habit => (
+                <button
+                  key={habit.id}
+                  onClick={() => toggleHabit(habit.id, habit.completed)}
+                  className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-zinc-800 transition active:bg-zinc-700"
+                >
+                  <input
+                    type="checkbox"
+                    checked={habit.completed}
+                    onChange={() => {}}
+                    className="w-4 h-4 rounded accent-orange-500 cursor-pointer"
+                    onClick={e => e.stopPropagation()}
+                  />
+                  <span className="text-lg">{habit.icon ?? '⭐'}</span>
+                  <span className={`flex-1 text-sm ${habit.completed ? 'text-zinc-500 line-through' : 'text-white'}`}>
+                    {habit.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </Card>
+        )}
 
         {/* Daily Readiness Check-in */}
         <ReadinessCheckin userId={profile?.id ?? ''} onScoreUpdate={setReadinessScore} />

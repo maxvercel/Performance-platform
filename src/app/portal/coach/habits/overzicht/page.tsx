@@ -4,64 +4,91 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { format, subDays } from 'date-fns'
 import { nl } from 'date-fns/locale'
+import { selectInChunks } from '@/lib/supabase/queryHelpers'
+
+interface HabitRow {
+  id: string; client_id: string; name: string; icon: string | null;
+  target_value: number | null; target_unit: string | null; active: boolean;
+}
+interface HabitLogRow {
+  id: string; habit_id: string; client_id: string; date: string;
+  completed: boolean; value: number | null;
+}
+interface ClientProfile {
+  id: string; full_name: string; email: string; role: string;
+}
 
 export default function HabitsOverzicht() {
   const supabase = createClient()
   const router = useRouter()
 
-  const [clients, setClients] = useState<any[]>([])
-  const [data, setData] = useState<Record<string, { habits: any[], logs: any[] }>>({})
+  const [clients, setClients] = useState<ClientProfile[]>([])
+  const [data, setData] = useState<Record<string, { habits: HabitRow[], logs: HabitLogRow[] }>>({})
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
 
   useEffect(() => { load() }, [selectedDate])
 
   async function load() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.push('/portal/login'); return }
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { router.push('/portal/login'); return }
 
-    const { data: relations } = await supabase
-      .from('coach_client')
-      .select('client_id')
-      .eq('coach_id', user.id)
-      .eq('active', true)
-
-    const clientIds = relations?.map(r => r.client_id) ?? []
-    if (clientIds.length === 0) { setLoading(false); return }
-
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('*')
-      .in('id', clientIds)
-
-    setClients(profiles ?? [])
-
-    // Haal habits + logs op per client
-    const result: Record<string, { habits: any[], logs: any[] }> = {}
-
-    for (const clientId of clientIds) {
-      const { data: habits } = await supabase
-        .from('habits')
-        .select('*')
-        .eq('client_id', clientId)
+      const { data: relations, error: relErr } = await supabase
+        .from('coach_client')
+        .select('client_id')
+        .eq('coach_id', user.id)
         .eq('active', true)
 
-      const { data: logs } = await supabase
-        .from('habit_logs')
-        .select('*')
-        .eq('client_id', clientId)
-        .eq('date', selectedDate)
+      if (relErr) { setError('Kan clients niet laden.'); setLoading(false); return }
 
-      result[clientId] = { habits: habits ?? [], logs: logs ?? [] }
+      const clientIds = relations?.map(r => r.client_id) ?? []
+      if (clientIds.length === 0) { setLoading(false); return }
+
+      // Batch: profiles, habits, logs in 3 parallel queries instead of N+1
+      const [profiles, allHabits, allLogs] = await Promise.all([
+        selectInChunks<ClientProfile>(supabase, 'profiles', 'id, full_name, email, role', 'id', clientIds),
+        selectInChunks<HabitRow>(supabase, 'habits', '*', 'client_id', clientIds, (q) => q.eq('active', true)),
+        selectInChunks<HabitLogRow>(supabase, 'habit_logs', '*', 'client_id', clientIds, (q) => q.eq('date', selectedDate)),
+      ])
+
+      setClients(profiles)
+
+      // Group by client_id
+      const result: Record<string, { habits: HabitRow[], logs: HabitLogRow[] }> = {}
+      for (const id of clientIds) {
+        result[id] = { habits: [], logs: [] }
+      }
+      allHabits.forEach(h => { result[h.client_id]?.habits.push(h) })
+      allLogs.forEach(l => { result[l.client_id]?.logs.push(l) })
+
+      setData(result)
+    } catch (err) {
+      console.error('Habits overzicht load error:', err)
+      setError('Er ging iets mis bij het laden.')
+    } finally {
+      setLoading(false)
     }
-
-    setData(result)
-    setLoading(false)
   }
 
   if (loading) return (
     <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
       <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+
+  if (error) return (
+    <div className="min-h-screen bg-zinc-950 flex items-center justify-center px-6">
+      <div className="text-center">
+        <p className="text-4xl mb-3">⚠️</p>
+        <p className="text-red-400 font-bold mb-2">Fout bij laden</p>
+        <p className="text-zinc-500 text-sm mb-4">{error}</p>
+        <button onClick={() => { setError(null); setLoading(true); load() }}
+          className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-6 py-2 rounded-xl text-sm transition">
+          Opnieuw proberen
+        </button>
+      </div>
     </div>
   )
 
@@ -113,7 +140,7 @@ export default function HabitsOverzicht() {
           const clientData = data[client.id]
           const habits = clientData?.habits ?? []
           const logs = clientData?.logs ?? []
-          const logMap: Record<string, any> = {}
+          const logMap: Record<string, HabitLogRow> = {}
           logs.forEach(l => { logMap[l.habit_id] = l })
 
           const completed = habits.filter(h => logMap[h.id]?.completed).length

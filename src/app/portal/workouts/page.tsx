@@ -8,6 +8,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { PageSpinner } from '@/components/ui/Spinner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { selectInChunks } from '@/lib/supabase/queryHelpers'
 import {
   WorkoutDoneScreen,
   ProgramGrid,
@@ -18,7 +19,7 @@ import {
 import { parseRepsDefault } from '@/utils/calculations'
 import { calculateAdjustedWeight, averageRpe, getTrainingRecommendation } from '@/utils/autoAdjust'
 
-type SetLog = { weight: string; reps: string; rpe: string; done: boolean }
+type SetLog = { weight: string; reps: string; rpe: string; done: boolean; notes?: string; is_warmup?: boolean }
 
 export default function WorkoutsPage() {
   const supabase = createClient()
@@ -255,14 +256,12 @@ export default function WorkoutsPage() {
     const prMap: Record<string, number> = {}
     const userWlIds = allUserWlRes.data?.map((wl: any) => wl.id) ?? []
     if (userWlIds.length > 0) {
-      const { data: prLogs } = await supabase
-        .from('exercise_logs')
-        .select('exercise_id, weight_kg')
-        .in('workout_log_id', userWlIds)
-        .not('weight_kg', 'is', null)
-        .order('weight_kg', { ascending: false })
+      const prLogs = await selectInChunks<{ exercise_id: string; weight_kg: number }>(
+        supabase, 'exercise_logs', 'exercise_id, weight_kg', 'workout_log_id', userWlIds,
+        (q) => q.not('weight_kg', 'is', null).order('weight_kg', { ascending: false })
+      )
 
-      prLogs?.forEach((log: any) => {
+      prLogs.forEach((log) => {
         if (!prMap[log.exercise_id] || log.weight_kg > prMap[log.exercise_id]) {
           prMap[log.exercise_id] = log.weight_kg
         }
@@ -433,7 +432,7 @@ export default function WorkoutsPage() {
     setSaving(false)
   }
 
-  function handleSetChange(peId: string, setIndex: number, field: 'weight' | 'reps' | 'rpe', value: string) {
+  function handleSetChange(peId: string, setIndex: number, field: 'weight' | 'reps' | 'rpe' | 'notes', value: string) {
     setSetLogs(prev => ({
       ...prev,
       [peId]: prev[peId].map((s, i) => (i === setIndex ? { ...s, [field]: value } : s)),
@@ -449,6 +448,19 @@ export default function WorkoutsPage() {
           .eq('exercise_id', pe.exercise_id)
           .eq('set_number', setIndex + 1)
           .then(({ error }) => { if (error) console.error('RPE update error:', error) })
+      }
+    }
+
+    // If changing notes on a completed set, update the DB directly
+    if (field === 'notes' && setLogs[peId]?.[setIndex]?.done && workoutLogId) {
+      const pe = selectedDay?.program_exercises?.find((e: any) => e.id === peId)
+      if (pe) {
+        supabase.from('exercise_logs')
+          .update({ notes: value || null })
+          .eq('workout_log_id', workoutLogId)
+          .eq('exercise_id', pe.exercise_id)
+          .eq('set_number', setIndex + 1)
+          .then(({ error }) => { if (error) console.error('Notes update error:', error) })
       }
     }
   }

@@ -18,6 +18,12 @@ export interface Profile {
   phone: string | null
   birthdate: string | null
   created_at: string
+  height_cm: number | null
+  weight_kg: number | null
+  experience_level: 'beginner' | 'intermediate' | 'advanced' | null
+  training_days_per_week: number | null
+  goal: string | null
+  onboarded: boolean
 }
 
 export interface Exercise {
