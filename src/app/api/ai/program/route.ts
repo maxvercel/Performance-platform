@@ -103,7 +103,15 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 4000,
-        system: `Je bent een expert personal trainer. Reageer ALLEEN met valid JSON. Geen tekst, geen markdown. Begin met { en eindig met }.`,
+        system: `Je bent een expert personal trainer. Reageer ALLEEN met valid JSON. Geen tekst, geen markdown. Begin met { en eindig met }.
+
+KRITIEKE REGELS:
+1. Gebruik EXACT de oefeningen en volgorde die de coach noemt. Verzin GEEN eigen oefeningen.
+2. Als de coach superset labels gebruikt (A1, A2, B1, B2, C1 etc.), zet dan de LETTER als superset_group ("A", "B", "C", "D").
+3. Neem ALLE oefeningen over — sla er GEEN over. Als de coach 9 oefeningen per training geeft, geef je 9 terug.
+4. Als de coach week-specifieke reps/progressie noemt (bijv. "week 1-2: 12, week 3-4: 15"), pas dit aan per week.
+5. Behoud tempo notaties, zijde-aanduidingen en alle details in de notes.
+6. Zet muscle_group op: "Borst", "Rug", "Benen", "Schouders", "Armen", "Core", "Billen" of "Cardio".`,
         messages: [{
           role: 'user',
           content: `Programma: ${templateName}
@@ -111,14 +119,16 @@ Week: ${week.week} van ${totalWeeks}
 Progressie: ${progressie}
 Dagen: ${numDays} (${dayLabels})
 
-Coach instructie: ${prompt}
+Coach instructie:
+${prompt}
 
-Gebruik EXACT de oefeningen die de coach noemt in de instructie.
-Je mag elke oefeninnaam gebruiken — ook als die nieuw is.
-Vul ALLE ${numDays} dagen in met 8-12 oefeningen per dag, gegroepeerd in supersets.
-Groepeer oefeningen in supersets (A, B, C, D). Oefeningen met dezelfde superset_group worden direct na elkaar uitgevoerd zonder rust.
+BELANGRIJK:
+- Neem ALLE oefeningen uit de instructie over, exact zoals beschreven
+- Als de coach A1/A2/B1/B2 superset labels gebruikt: A1+A2+A3 krijgen superset_group "A", B1+B2 krijgen "B", etc.
+- Pas reps aan voor week ${week.week} als de coach week-specifieke progressie noemt
+- Zet tempo en andere details in het notes veld
 
-Retourneer dit JSON. Voor elke oefening: zet muscle_group op een van deze Nederlandse spiergroupes: "Borst", "Rug", "Benen", "Schouders", "Armen", "Core", "Billen", "Cardio":
+Retourneer ALLEEN dit JSON formaat:
 {
   "week_number": ${week.week},
   "days": [
@@ -126,14 +136,11 @@ Retourneer dit JSON. Voor elke oefening: zet muscle_group op een van deze Nederl
       "day_number": ${d.day_number},
       "label": "${d.dag}",
       "exercises": [
-        {"name": "Bench Press", "sets": 4, "reps": "8-10", "weight_kg": null, "rest_seconds": 90, "notes": "RPE 7", "superset_group": "A", "muscle_group": "Borst"},
-        {"name": "Bent Over Row", "sets": 4, "reps": "8-10", "weight_kg": null, "rest_seconds": 90, "notes": "RPE 7, superset met Bench Press", "superset_group": "A", "muscle_group": "Rug"},
-        {"name": "Overhead Press", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 7", "superset_group": "B", "muscle_group": "Schouders"},
-        {"name": "Lat Pulldown", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 7, superset", "superset_group": "B", "muscle_group": "Rug"},
-        {"name": "Dumbbell Flyes", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 60, "notes": "RPE 6", "superset_group": "C", "muscle_group": "Borst"},
-        {"name": "Face Pulls", "sets": 3, "reps": "12-15", "weight_kg": null, "rest_seconds": 60, "notes": "RPE 6, superset", "superset_group": "C", "muscle_group": "Schouders"},
-        {"name": "Barbell Curls", "sets": 3, "reps": "8-10", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 6", "superset_group": "D", "muscle_group": "Armen"},
-        {"name": "Tricep Dips", "sets": 3, "reps": "8-10", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 6, superset", "superset_group": "D", "muscle_group": "Armen"}
+        {"name": "Side Lying Hip Abduction", "sets": 3, "reps": "12/zijde", "weight_kg": null, "rest_seconds": 0, "notes": "tempo 1-1-2-1, RPE 6-7", "superset_group": "A", "muscle_group": "Billen"},
+        {"name": "Dead Bug", "sets": 3, "reps": "12/zijde", "weight_kg": null, "rest_seconds": 0, "notes": "tempo 3-1-3-1", "superset_group": "A", "muscle_group": "Core"},
+        {"name": "Lateral Band Walk", "sets": 3, "reps": "10 m", "weight_kg": null, "rest_seconds": 90, "notes": "RPE 6-7", "superset_group": "A", "muscle_group": "Billen"},
+        {"name": "Single Leg Glute Bridge", "sets": 3, "reps": "8-10/zijde", "weight_kg": null, "rest_seconds": 0, "notes": "tempo 1-1-3-2", "superset_group": "B", "muscle_group": "Billen"},
+        {"name": "Single Leg Balance Reach", "sets": 3, "reps": "8-10/zijde", "weight_kg": null, "rest_seconds": 90, "notes": "3x8 richtingen", "superset_group": "B", "muscle_group": "Benen"}
       ]
     }`).join(',\n    ')}
   ]
