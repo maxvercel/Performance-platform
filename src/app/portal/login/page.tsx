@@ -96,8 +96,32 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
 
         {/* Logo */}
-        <div className="text-center mb-8">
-          <img src="/logo-email.png" alt="9toFit" className="mx-auto w-56 h-auto mb-2" />
+        <div className="text-center mb-8 flex flex-col items-center gap-3">
+          <svg
+            width="72"
+            height="72"
+            viewBox="0 0 100 100"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            className="drop-shadow-[0_0_25px_rgba(243,115,33,0.35)]"
+          >
+            <defs>
+              <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#f37321" />
+                <stop offset="50%" stopColor="#ff8c42" />
+                <stop offset="100%" stopColor="#f37321" />
+              </linearGradient>
+              <mask id="plusMask">
+                <circle cx="50" cy="50" r="44" fill="white" />
+                <rect x="43" y="24" width="14" height="52" rx="4" fill="black" />
+                <rect x="24" y="43" width="52" height="14" rx="4" fill="black" />
+              </mask>
+            </defs>
+            <circle cx="50" cy="50" r="44" fill="url(#logoGrad)" mask="url(#plusMask)" />
+          </svg>
+          <span className="text-[11px] uppercase tracking-[4px] text-zinc-500 font-medium">
+            Performance Coaching
+          </span>
         </div>
 
         {/* Tabs */}

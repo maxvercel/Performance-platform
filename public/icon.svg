@@ -1,13 +1,18 @@
 <svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-  <!-- Background with rounded corners for app icon feel -->
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f37321"/>
+      <stop offset="50%" stop-color="#ff8c42"/>
+      <stop offset="100%" stop-color="#f37321"/>
+    </linearGradient>
+    <mask id="m">
+      <circle cx="256" cy="256" r="225" fill="white"/>
+      <rect x="220" y="122" width="72" height="268" rx="20" fill="black"/>
+      <rect x="122" y="220" width="268" height="72" rx="20" fill="black"/>
+    </mask>
+  </defs>
+  <!-- Dark rounded background -->
   <rect width="512" height="512" rx="96" fill="#09090b"/>
-
-  <!-- "9" large -->
-  <text x="160" y="310" font-family="Arial, Helvetica, sans-serif" font-size="260" font-weight="800" fill="#f97316" text-anchor="middle" dominant-baseline="middle">9</text>
-
-  <!-- "to" smaller -->
-  <text x="295" y="220" font-family="Arial, Helvetica, sans-serif" font-size="80" font-weight="600" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">to</text>
-
-  <!-- "Fit" bold -->
-  <text x="390" y="330" font-family="Arial, Helvetica, sans-serif" font-size="100" font-weight="800" fill="#f97316" text-anchor="middle" dominant-baseline="middle">Fit</text>
+  <!-- Orange circle with + cutout -->
+  <circle cx="256" cy="256" r="225" fill="url(#g)" mask="url(#m)"/>
 </svg>
