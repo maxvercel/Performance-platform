@@ -9,8 +9,10 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { calc1RM } from '@/utils/calculations'
 import { RANK_ORDER, getRank } from '@/utils/constants'
 import { HexBadge, RankLadder, RecordCard } from '@/components/records'
+import type { PersonalRecord } from '@/types'
 
 type FilterType = 'all' | 'elite' | 'gold'
+const PAGE_SIZE = 20
 
 const ELITE_IDS = new Set(['champion', 'titan', 'olympian'])
 const GOLD_IDS = new Set(['gold', 'platinum', 'diamond', 'champion', 'titan', 'olympian'])
@@ -20,9 +22,10 @@ export default function RecordsPage() {
   const router = useRouter()
   const { profile, loading: authLoading } = useAuth()
 
-  const [records, setRecords] = useState<any[]>([])
+  const [records, setRecords] = useState<PersonalRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<FilterType>('all')
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   useEffect(() => {
     if (authLoading || !profile) return
@@ -73,11 +76,12 @@ export default function RecordsPage() {
     // 3a. Groepeer logs per oefening + per workout sessie
     const sessionBests: Record<string, Record<string, { weight: number; reps: number; date: string; exName: string; exMuscle: string }>> = {}
 
-    logs.forEach((log: any) => {
-      const exId = log.exercises?.id
+    logs.forEach((log) => {
+      const ex = log.exercises as unknown as { id: string; name: string; muscle_group: string } | null
+      const exId = ex?.id
       if (!exId || !log.weight_kg) return
       const wlId = log.workout_log_id
-      const w = parseFloat(log.weight_kg)
+      const w = parseFloat(String(log.weight_kg))
 
       if (!sessionBests[exId]) sessionBests[exId] = {}
       const existing = sessionBests[exId][wlId]
@@ -87,28 +91,33 @@ export default function RecordsPage() {
           weight: w,
           reps: log.reps_completed ?? 1,
           date: wlDateMap[wlId] ?? '',
-          exName: log.exercises.name,
-          exMuscle: log.exercises.muscle_group ?? 'Overig',
+          exName: ex!.name,
+          exMuscle: ex!.muscle_group ?? 'Overig',
         }
       }
     })
 
     // 3b. Per oefening: sorteer sessies op datum, tel PRs over sessies heen
-    const exerciseMap: Record<string, any> = {}
+    interface BuildingRecord {
+      id: string; name: string; muscleGroup: string;
+      prs: { weight: number; reps: number; date: string; improvement: number }[];
+      currentMax: number; currentMaxReps: number; firstWeight: number | null;
+    }
+    const exerciseMap: Record<string, BuildingRecord> = {}
 
     for (const [exId, sessions] of Object.entries(sessionBests)) {
       const sorted = Object.values(sessions).sort(
         (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
       )
 
-      const entry = {
+      const entry: BuildingRecord = {
         id: exId,
         name: sorted[0].exName,
         muscleGroup: sorted[0].exMuscle,
-        prs: [] as any[],
+        prs: [],
         currentMax: 0,
         currentMaxReps: 1,
-        firstWeight: null as number | null,
+        firstWeight: null,
       }
 
       for (const session of sorted) {
@@ -130,10 +139,10 @@ export default function RecordsPage() {
       exerciseMap[exId] = entry
     }
 
-    const result = Object.values(exerciseMap)
-      .filter((e: any) => e.prs.length > 0)
-      .map((e: any) => {
-        const improvementPct = e.firstWeight > 0
+    const result: PersonalRecord[] = Object.values(exerciseMap)
+      .filter(e => e.prs.length > 0)
+      .map(e => {
+        const improvementPct = e.firstWeight && e.firstWeight > 0
           ? ((e.currentMax - e.firstWeight) / e.firstWeight) * 100
           : 0
         const rank = getRank(e.prs.length, improvementPct)
@@ -144,7 +153,7 @@ export default function RecordsPage() {
           improvementPct: Math.round(improvementPct),
         }
       })
-      .sort((a: any, b: any) => {
+      .sort((a, b) => {
         const diff = (RANK_ORDER[b.rank.id] ?? 0) - (RANK_ORDER[a.rank.id] ?? 0)
         return diff !== 0 ? diff : b.improvementPct - a.improvementPct
       })
@@ -155,11 +164,13 @@ export default function RecordsPage() {
 
   /* ─── Computed ─── */
 
-  const filteredRecords = records.filter(r => {
+  const allFilteredRecords = records.filter(r => {
     if (filter === 'elite') return ELITE_IDS.has(r.rank.id)
     if (filter === 'gold') return GOLD_IDS.has(r.rank.id)
     return true
   })
+  const filteredRecords = allFilteredRecords.slice(0, visibleCount)
+  const hasMore = allFilteredRecords.length > visibleCount
 
   const topRank = records.length > 0
     ? records.reduce((best, r) => (RANK_ORDER[r.rank.id] ?? 0) > (RANK_ORDER[best.rank.id] ?? 0) ? r : best, records[0])
@@ -229,7 +240,7 @@ export default function RecordsPage() {
               ]).map(f => (
                 <button
                   key={f.key}
-                  onClick={() => setFilter(f.key)}
+                  onClick={() => { setFilter(f.key); setVisibleCount(PAGE_SIZE) }}
                   role="tab"
                   aria-selected={filter === f.key}
                   className={`px-4 py-2 rounded-full text-xs font-bold transition-all duration-200 ${
@@ -245,10 +256,21 @@ export default function RecordsPage() {
 
             {/* Record cards */}
             <div className="space-y-3">
-              {filteredRecords.map((record: any) => (
+              {filteredRecords.map((record) => (
                 <RecordCard key={record.id} record={record} />
               ))}
             </div>
+
+            {/* Load more */}
+            {hasMore && (
+              <button
+                onClick={() => setVisibleCount(prev => prev + PAGE_SIZE)}
+                className="w-full py-3 bg-zinc-900 border border-zinc-800 rounded-2xl text-zinc-400
+                           hover:text-white hover:border-orange-500/40 font-bold text-sm transition"
+              >
+                Meer laden ({allFilteredRecords.length - visibleCount} overig)
+              </button>
+            )}
           </>
         )}
       </div>

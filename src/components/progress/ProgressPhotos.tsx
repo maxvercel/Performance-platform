@@ -11,8 +11,10 @@ interface Photo {
   photo_url: string
   category: 'front' | 'side' | 'back'
   taken_at: string
-  notes?: string
+  notes?: string | null
 }
+
+type UploadStage = 'idle' | 'validating' | 'uploading' | 'saving'
 
 interface ProgressPhotosProps {
   photos: Photo[]
@@ -48,6 +50,7 @@ export default function ProgressPhotos({
   const [uploadCategory, setUploadCategory] = useState<'front' | 'side' | 'back'>('front')
   const [uploadNotes, setUploadNotes] = useState('')
   const [uploadError, setUploadError] = useState('')
+  const [uploadStage, setUploadStage] = useState<UploadStage>('idle')
 
   const filteredPhotos = selectedFilter === 'all'
     ? photos
@@ -76,14 +79,36 @@ export default function ProgressPhotos({
     }
 
     try {
+      setUploadStage('validating')
+      // Brief pause so user sees validation step
+      await new Promise(r => setTimeout(r, 200))
+      setUploadStage('uploading')
       await onUpload(uploadFile, uploadCategory, uploadNotes)
+      setUploadStage('saving')
+      await new Promise(r => setTimeout(r, 300))
       setShowUploadModal(false)
       setUploadFile(null)
       setUploadNotes('')
       setUploadCategory('front')
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Upload mislukt')
+    } finally {
+      setUploadStage('idle')
     }
+  }
+
+  const uploadStageLabel: Record<UploadStage, string> = {
+    idle: '',
+    validating: 'Valideren...',
+    uploading: 'Foto uploaden...',
+    saving: 'Opslaan...',
+  }
+
+  const uploadStageProgress: Record<UploadStage, number> = {
+    idle: 0,
+    validating: 20,
+    uploading: 60,
+    saving: 90,
   }
 
   const getPhotosForComparison = () => {
@@ -329,26 +354,49 @@ export default function ProgressPhotos({
                 </div>
               )}
 
+              {/* Upload progress */}
+              {uploadStage !== 'idle' && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-400">{uploadStageLabel[uploadStage]}</span>
+                    <span className="text-xs text-zinc-500">{uploadStageProgress[uploadStage]}%</span>
+                  </div>
+                  <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-orange-500 rounded-full transition-all duration-500 ease-out"
+                      style={{ width: `${uploadStageProgress[uploadStage]}%` }}
+                    />
+                  </div>
+                  {uploadFile && (
+                    <p className="text-xs text-zinc-600">
+                      {uploadFile.name} · {(uploadFile.size / 1024 / 1024).toFixed(1)} MB
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={() => {
                     setShowUploadModal(false)
                     setUploadError('')
+                    setUploadStage('idle')
                   }}
-                  className="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg font-medium transition-colors"
+                  disabled={uploadStage !== 'idle'}
+                  className="flex-1 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
                 >
                   Annuleren
                 </button>
                 <button
                   onClick={handleUploadSubmit}
-                  disabled={uploading || !uploadFile}
+                  disabled={uploading || !uploadFile || uploadStage !== 'idle'}
                   className="flex-1 px-4 py-2 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-500/50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
                 >
-                  {uploading ? (
+                  {uploadStage !== 'idle' ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Uploaden...
+                      {uploadStageLabel[uploadStage]}
                     </>
                   ) : (
                     'Upload'

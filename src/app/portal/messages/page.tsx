@@ -4,6 +4,17 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
 import { nl } from 'date-fns/locale'
+import type { Profile } from '@/types'
+
+interface ChatMessage {
+  id: string
+  coach_id: string
+  client_id: string
+  sender_id: string
+  content: string
+  read_at: string | null
+  created_at: string
+}
 
 export default function MessagesPage() {
   const supabase = createClient()
@@ -11,11 +22,13 @@ export default function MessagesPage() {
 
   const [userId, setUserId] = useState<string | null>(null)
   const [coachId, setCoachId] = useState<string | null>(null)
-  const [coach, setCoach] = useState<any>(null)
-  const [messages, setMessages] = useState<any[]>([])
+  const [coach, setCoach] = useState<Profile | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [newMessage, setNewMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [sendError, setSendError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { load() }, [])
@@ -24,67 +37,116 @@ export default function MessagesPage() {
   }, [messages])
 
   async function load() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.push('/portal/login'); return }
-    setUserId(user.id)
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (authError || !user) { router.push('/portal/login'); return }
+      setUserId(user.id)
 
-    const { data: relation } = await supabase
-      .from('coach_client')
-      .select('coach_id')
-      .eq('client_id', user.id)
-      .eq('active', true)
-      .limit(1).single()
+      const { data: relation, error: relError } = await supabase
+        .from('coach_client')
+        .select('coach_id')
+        .eq('client_id', user.id)
+        .eq('active', true)
+        .limit(1).single()
 
-    if (!relation) { setLoading(false); return }
-    setCoachId(relation.coach_id)
+      if (relError && relError.code !== 'PGRST116') {
+        console.error('Coach relation error:', relError)
+        setError('Kan coach-koppeling niet laden.')
+        setLoading(false)
+        return
+      }
 
-    const { data: coachProfile } = await supabase
-      .from('profiles').select('*').eq('id', relation.coach_id).single()
-    setCoach(coachProfile)
+      if (!relation) { setLoading(false); return }
+      setCoachId(relation.coach_id)
 
-    const { data: msgs } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('coach_id', relation.coach_id)
-      .eq('client_id', user.id)
-      .order('created_at', { ascending: true })
+      const { data: coachProfile, error: coachError } = await supabase
+        .from('profiles').select('*').eq('id', relation.coach_id).single()
 
-    setMessages(msgs ?? [])
+      if (coachError) console.error('Coach profile error:', coachError)
+      setCoach(coachProfile as Profile | null)
 
-    // Markeer als gelezen
-    await supabase
-      .from('messages')
-      .update({ read_at: new Date().toISOString() })
-      .eq('coach_id', relation.coach_id)
-      .eq('client_id', user.id)
-      .eq('sender_id', relation.coach_id)
-      .is('read_at', null)
+      const { data: msgs, error: msgsError } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('coach_id', relation.coach_id)
+        .eq('client_id', user.id)
+        .order('created_at', { ascending: true })
 
-    setLoading(false)
+      if (msgsError) {
+        console.error('Messages fetch error:', msgsError)
+        setError('Kan berichten niet laden. Probeer het opnieuw.')
+        setLoading(false)
+        return
+      }
+
+      setMessages((msgs as ChatMessage[]) ?? [])
+
+      // Markeer als gelezen
+      await supabase
+        .from('messages')
+        .update({ read_at: new Date().toISOString() })
+        .eq('coach_id', relation.coach_id)
+        .eq('client_id', user.id)
+        .eq('sender_id', relation.coach_id)
+        .is('read_at', null)
+    } catch (err) {
+      console.error('Messages page load error:', err)
+      setError('Er ging iets mis bij het laden van berichten.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function sendMessage() {
     if (!newMessage.trim() || !userId || !coachId) return
     setSending(true)
+    setSendError(null)
 
-    const { data } = await supabase
-      .from('messages')
-      .insert({
-        coach_id: coachId,
-        client_id: userId,
-        sender_id: userId,
-        content: newMessage.trim(),
-      })
-      .select().single()
+    try {
+      const { data, error: insertError } = await supabase
+        .from('messages')
+        .insert({
+          coach_id: coachId,
+          client_id: userId,
+          sender_id: userId,
+          content: newMessage.trim(),
+        })
+        .select().single()
 
-    if (data) setMessages(prev => [...prev, data])
-    setNewMessage('')
-    setSending(false)
+      if (insertError) {
+        console.error('Send message error:', insertError)
+        setSendError('Bericht niet verzonden. Probeer opnieuw.')
+        setSending(false)
+        return
+      }
+
+      if (data) setMessages(prev => [...prev, data as ChatMessage])
+      setNewMessage('')
+    } catch (err) {
+      console.error('Send message error:', err)
+      setSendError('Bericht niet verzonden. Controleer je verbinding.')
+    } finally {
+      setSending(false)
+    }
   }
 
   if (loading) return (
     <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
       <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+
+  if (error) return (
+    <div className="min-h-screen bg-zinc-950 flex items-center justify-center px-6">
+      <div className="text-center">
+        <p className="text-4xl mb-3">⚠️</p>
+        <p className="text-red-400 font-bold mb-2">Fout bij laden</p>
+        <p className="text-zinc-500 text-sm mb-4">{error}</p>
+        <button onClick={() => { setError(null); setLoading(true); load() }}
+          className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-6 py-2 rounded-xl text-sm transition">
+          Opnieuw proberen
+        </button>
+      </div>
     </div>
   )
 
@@ -141,11 +203,16 @@ export default function MessagesPage() {
       </div>
 
       <div className="bg-zinc-900 border-t border-zinc-800 px-4 py-3 flex-shrink-0 mb-16">
+        {sendError && (
+          <div className="mb-2 px-3 py-2 bg-red-500/15 border border-red-500/30 rounded-xl">
+            <p className="text-red-400 text-xs">{sendError}</p>
+          </div>
+        )}
         <div className="flex gap-2">
           <input
             type="text"
             value={newMessage}
-            onChange={e => setNewMessage(e.target.value)}
+            onChange={e => { setNewMessage(e.target.value); setSendError(null) }}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
             placeholder="Stel je coach een vraag..."
             className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3

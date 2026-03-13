@@ -24,7 +24,58 @@ import ProgressPhotos from '@/components/progress/ProgressPhotos'
 import StravaConnect from '@/components/progress/StravaConnect'
 import { BodyMap } from '@/components/ui/BodyMap'
 
+import type { WorkoutLog, ExerciseLog } from '@/types'
+
 type Tab = 'kracht' | 'cardio' | 'programmas' | 'fotos'
+
+interface EnrichedWorkoutLog extends WorkoutLog {
+  exercise_logs: ExerciseLog[]
+}
+
+interface ProgramSummary {
+  id: string
+  name: string
+  goal: string
+  start_date: string
+  is_active: boolean
+  program_weeks: { id: string }[]
+  numWeeks: number
+  completedWorkouts: number
+}
+
+interface CardioLog {
+  id: string
+  client_id: string
+  logged_at: string
+  distance_km: number | null
+  duration_seconds: number | null
+  avg_heart_rate: number | null
+  notes: string | null
+  activity_type: string
+}
+
+interface ProgressPhoto {
+  id: string
+  client_id: string
+  photo_url: string
+  category: 'front' | 'side' | 'back'
+  taken_at: string
+  notes: string | null
+}
+
+interface ExerciseOption {
+  id: string
+  name: string
+  muscle_group: string
+}
+
+interface ExerciseProgressPoint {
+  date: string
+  gewicht: number
+  '1RM': number
+  volume: number
+  isPR: boolean
+}
 
 const DEFAULT_RUN_FORM = {
   date: format(new Date(), 'yyyy-MM-dd'),
@@ -45,24 +96,24 @@ export default function ProgressPage() {
   const [calendarMonth, setCalendarMonth] = useState(new Date())
 
   // Programs
-  const [allPrograms, setAllPrograms] = useState<any[]>([])
+  const [allPrograms, setAllPrograms] = useState<ProgramSummary[]>([])
 
   // Kracht
-  const [workoutHistory, setWorkoutHistory] = useState<any[]>([])
-  const [exercises, setExercises] = useState<any[]>([])
+  const [workoutHistory, setWorkoutHistory] = useState<EnrichedWorkoutLog[]>([])
+  const [exercises, setExercises] = useState<ExerciseOption[]>([])
   const [selectedExercise, setSelectedExercise] = useState<string>('')
-  const [exerciseProgress, setExerciseProgress] = useState<any[]>([])
-  const [weeklyFrequency, setWeeklyFrequency] = useState<any[]>([])
+  const [exerciseProgress, setExerciseProgress] = useState<ExerciseProgressPoint[]>([])
+  const [weeklyFrequency, setWeeklyFrequency] = useState<{ week: string; count: number }[]>([])
   const [muscleVolume, setMuscleVolume] = useState<{ name: string; volume: number }[]>([])
 
   // Cardio
-  const [runs, setRuns] = useState<any[]>([])
+  const [runs, setRuns] = useState<CardioLog[]>([])
   const [showRunForm, setShowRunForm] = useState(false)
   const [runForm, setRunForm] = useState(DEFAULT_RUN_FORM)
   const [savingRun, setSavingRun] = useState(false)
 
   // Photos
-  const [photos, setPhotos] = useState<any[]>([])
+  const [photos, setPhotos] = useState<ProgressPhoto[]>([])
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
 
   /* ─── Data loading ─── */
@@ -98,7 +149,7 @@ export default function ProgressPage() {
       return
     }
 
-    const logIds = logs.map((l: any) => l.id)
+    const logIds = logs.map(l => l.id)
     const { data: exLogs, error: exError } = await supabase
       .from('exercise_logs')
       .select('id, workout_log_id, exercise_id, set_number, weight_kg, reps_completed, exercises(name, muscle_group)')
@@ -107,16 +158,16 @@ export default function ProgressPage() {
     if (exError) console.error('Exercise logs fetch error:', exError)
 
     // Enrich logs with exercise data
-    const exLogsByWorkout: Record<string, any[]> = {}
-    exLogs?.forEach((el: any) => {
+    const exLogsByWorkout: Record<string, ExerciseLog[]> = {}
+    exLogs?.forEach(el => {
       if (!exLogsByWorkout[el.workout_log_id]) exLogsByWorkout[el.workout_log_id] = []
-      exLogsByWorkout[el.workout_log_id].push(el)
+      exLogsByWorkout[el.workout_log_id].push(el as unknown as ExerciseLog)
     })
-    setWorkoutHistory(logs.map((log: any) => ({ ...log, exercise_logs: exLogsByWorkout[log.id] ?? [] })))
+    setWorkoutHistory(logs.map(log => ({ ...(log as unknown as WorkoutLog), exercise_logs: exLogsByWorkout[log.id] ?? [] })))
 
     // Weekly frequency
     const freqMap: Record<string, number> = {}
-    logs.forEach((log: any) => {
+    logs.forEach(log => {
       const weekStart = format(startOfWeek(parseISO(log.logged_at), { weekStartsOn: 1 }), 'dd MMM', { locale: nl })
       freqMap[weekStart] = (freqMap[weekStart] ?? 0) + 1
     })
@@ -124,8 +175,9 @@ export default function ProgressPage() {
 
     // Volume per muscle group
     const muscleVolumeMap: Record<string, number> = {}
-    exLogs?.forEach((el: any) => {
-      const mg = el.exercises?.muscle_group
+    exLogs?.forEach(el => {
+      const ex = el.exercises as unknown as { name: string; muscle_group: string } | null
+      const mg = ex?.muscle_group
       if (mg) muscleVolumeMap[mg] = (muscleVolumeMap[mg] ?? 0) + (el.weight_kg ?? 0) * (el.reps_completed ?? 0)
     })
     setMuscleVolume(
@@ -136,11 +188,12 @@ export default function ProgressPage() {
 
     // Unique exercises
     const seen = new Set<string>()
-    const uniqueEx: any[] = []
-    exLogs?.forEach((el: any) => {
-      if (el.exercises && !seen.has(el.exercise_id)) {
+    const uniqueEx: ExerciseOption[] = []
+    exLogs?.forEach(el => {
+      const ex = el.exercises as unknown as { name: string; muscle_group: string } | null
+      if (ex && !seen.has(el.exercise_id)) {
         seen.add(el.exercise_id)
-        uniqueEx.push(el.exercises)
+        uniqueEx.push({ id: el.exercise_id, name: ex.name, muscle_group: ex.muscle_group })
       }
     })
     setExercises(uniqueEx)
@@ -159,9 +212,10 @@ export default function ProgressPage() {
       .not('weight_kg', 'is', null)
 
     const byDate: Record<string, { weight: number; reps: number; date: string; volume: number; rawDate: string }> = {}
-    logs?.forEach((log: any) => {
-      if (!log.workout_logs?.logged_at) return
-      const rawDate = log.workout_logs.logged_at
+    logs?.forEach(log => {
+      const wl = log.workout_logs as { logged_at: string } | null
+      if (!wl?.logged_at) return
+      const rawDate = wl.logged_at
       const date = format(parseISO(rawDate), 'dd MMM', { locale: nl })
       const reps = log.reps_completed ?? 1
       const oneRM = calc1RM(log.weight_kg, reps)
@@ -201,16 +255,17 @@ export default function ProgressPage() {
       .not('completed_at', 'is', null)
 
     const workoutCountMap: Record<string, number> = {}
-    workoutLogs?.forEach((log: any) => {
+    workoutLogs?.forEach(log => {
       workoutCountMap[log.program_id] = (workoutCountMap[log.program_id] ?? 0) + 1
     })
 
     setAllPrograms(
       programs.map(p => ({
         ...p,
-        numWeeks: (p as any).program_weeks?.length ?? 0,
+        program_weeks: (p.program_weeks ?? []) as { id: string }[],
+        numWeeks: (p.program_weeks as { id: string }[] | null)?.length ?? 0,
         completedWorkouts: workoutCountMap[p.id] ?? 0,
-      }))
+      })) as ProgramSummary[]
     )
   }
 
@@ -338,14 +393,14 @@ export default function ProgressPage() {
 
   const totalVolume = workoutHistory.reduce(
     (acc, log) =>
-      acc + (log.exercise_logs?.reduce((a: number, el: any) => a + (el.weight_kg ?? 0) * (el.reps_completed ?? 0), 0) ?? 0),
+      acc + (log.exercise_logs?.reduce((a: number, el) => a + (el.weight_kg ?? 0) * (el.reps_completed ?? 0), 0) ?? 0),
     0
   )
   const totalRunKm = runs.reduce((acc, r) => acc + (r.distance_km ?? 0), 0)
   const paceRuns = runs.filter(r => r.distance_km && r.duration_seconds)
   const avgRunPace =
     paceRuns.length > 0
-      ? paceRuns.reduce((acc, r) => acc + r.duration_seconds / r.distance_km, 0) / paceRuns.length
+      ? paceRuns.reduce((acc, r) => acc + (r.duration_seconds ?? 0) / (r.distance_km ?? 1), 0) / paceRuns.length
       : 0
   const runChartData = [...runs].reverse().map(r => ({
     datum: format(parseISO(r.logged_at), 'dd MMM', { locale: nl }),
@@ -421,7 +476,7 @@ export default function ProgressPage() {
                     contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: 8 }}
                     labelStyle={{ color: '#fff' }}
                     itemStyle={{ color: '#f97316' }}
-                    formatter={(v: any) => [`${v} workouts`, '']}
+                    formatter={(v) => [`${v} workouts`, '']}
                   />
                   <Bar dataKey="count" fill="#f97316" radius={[4, 4, 0, 0]} />
                 </BarChart>
@@ -632,7 +687,7 @@ export default function ProgressPage() {
                   <Tooltip
                     contentStyle={{ backgroundColor: '#18181b', border: '1px solid #3f3f46', borderRadius: 8 }}
                     labelStyle={{ color: '#fff' }}
-                    formatter={(v: any) => [`${v} km`, 'Afstand']}
+                    formatter={(v) => [`${v} km`, 'Afstand']}
                   />
                   <Bar dataKey="km" fill="#f97316" radius={[4, 4, 0, 0]} />
                 </BarChart>

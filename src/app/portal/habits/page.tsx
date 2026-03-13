@@ -19,6 +19,7 @@ export default function HabitsPage() {
   const [logs, setLogs] = useState<Record<string, HabitLog>>({})
   const [dataLoading, setDataLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [selectedDate, setSelectedDate] = useState(() => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -27,14 +28,16 @@ export default function HabitsPage() {
   const loadData = useCallback(async () => {
     if (!userId) return
     try {
+      setError(null)
       const [habitsData, logsData] = await Promise.all([
         habitService.getActiveHabits(userId),
         habitService.getLogsByDate(userId, selectedDate),
       ])
       setHabits(habitsData)
       setLogs(logsData)
-    } catch (error) {
-      console.error('Habits loading error:', error)
+    } catch (err) {
+      console.error('Habits loading error:', err)
+      setError('Kan habits niet laden. Probeer het opnieuw.')
     } finally {
       setDataLoading(false)
     }
@@ -101,6 +104,21 @@ export default function HabitsPage() {
   const percentage = calcPercentage(completedCount, totalCount)
 
   if (authLoading || dataLoading) return <HabitsSkeleton />
+
+  if (error) return (
+    <div className="min-h-screen bg-zinc-950 pb-24">
+      <PageHeader label="Dagelijkse habits" title="Habits" />
+      <div className="px-4 py-12 text-center">
+        <p className="text-4xl mb-3">⚠️</p>
+        <p className="text-red-400 font-bold mb-2">Fout bij laden</p>
+        <p className="text-zinc-500 text-sm mb-4">{error}</p>
+        <button onClick={() => { setDataLoading(true); loadData() }}
+          className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition">
+          Opnieuw proberen
+        </button>
+      </div>
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-zinc-950 pb-24">
