@@ -91,6 +91,7 @@ export default function TemplateEditorPage() {
           rest_seconds: ex.rest_seconds,
           notes: ex.notes,
           order_index: ex.order_index,
+          superset_group: ex.superset_group,
         })
       })
     }
@@ -187,6 +188,7 @@ export default function TemplateEditorPage() {
               weight_kg: ex.weight_kg ?? null,
               rest_seconds: ex.rest_seconds ?? 90,
               notes: ex.notes ?? null,
+              superset_group: ex.superset_group ?? null,
               order_index: i,
             }))
           }
@@ -277,6 +279,7 @@ export default function TemplateEditorPage() {
         weight_kg: null,
         rest_seconds: 90,
         notes: null,
+        superset_group: null,
         order_index: dayExercises.length,
       })
       return { ...prev, [dayId]: dayExercises }
@@ -629,6 +632,13 @@ export default function TemplateEditorPage() {
                                     onChange={e => updateExercise(day.id, ei, 'rest_seconds', parseInt(e.target.value) || 90)}
                                     className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1
                                                text-white text-xs focus:outline-none focus:border-orange-500" />
+                                </div>
+                                <div className="flex-1">
+                                  <label className="text-zinc-600 text-[9px] uppercase">Superset</label>
+                                  <input type="text" value={ex.superset_group ?? ''} placeholder="A, B, C..."
+                                    onChange={e => updateExercise(day.id, ei, 'superset_group', e.target.value || null)}
+                                    className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1
+                                               text-white text-xs focus:outline-none focus:border-orange-500 uppercase" />
                                 </div>
                               </div>
                               <div className="pl-6">

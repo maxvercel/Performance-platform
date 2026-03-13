@@ -34,6 +34,7 @@ export async function POST(request: Request) {
       weight_kg: number | null
       rest_seconds: number | null
       notes: string | null
+      superset_group: string | null
     }>>
     weeks: Array<{
       week_number: number
@@ -166,6 +167,7 @@ export async function POST(request: Request) {
             weight_kg: ex.weight_kg ?? null,
             rest_seconds: ex.rest_seconds ?? 90,
             notes: ex.notes ?? null,
+            superset_group: ex.superset_group ?? null,
             order_index: ei,
           })
           exerciseCount++

@@ -36,6 +36,10 @@ export default function ClientDetail() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   // Toggling active
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  // Exercise editing
+  const [editingExercise, setEditingExercise] = useState<string | null>(null)
+  const [editValues, setEditValues] = useState<{ sets?: number; reps?: number; weight_kg?: number | null; rest_seconds?: number | null; notes?: string }>({})
+  const [savingExercise, setSavingExercise] = useState<string | null>(null)
 
   useEffect(() => { load() }, [clientId])
 
@@ -323,6 +327,61 @@ export default function ClientDetail() {
       return p
     }))
     setTogglingId(null)
+  }
+
+  function startEditing(pe: any) {
+    setEditingExercise(pe.id)
+    setEditValues({
+      sets: pe.sets,
+      reps: pe.reps,
+      weight_kg: pe.weight_kg,
+      rest_seconds: pe.rest_seconds,
+      notes: pe.notes,
+    })
+  }
+
+  function cancelEdit() {
+    setEditingExercise(null)
+    setEditValues({})
+  }
+
+  async function saveExerciseEdit(peId: string) {
+    setSavingExercise(peId)
+
+    const { error } = await supabase
+      .from('program_exercises')
+      .update({
+        sets: editValues.sets,
+        reps: editValues.reps,
+        weight_kg: editValues.weight_kg,
+        rest_seconds: editValues.rest_seconds,
+        notes: editValues.notes,
+      })
+      .eq('id', peId)
+
+    if (error) {
+      alert(`Kon oefening niet opslaan: ${error.message}`)
+      setSavingExercise(null)
+      return
+    }
+
+    // Update local state
+    setPrograms(prev => prev.map(prog => ({
+      ...prog,
+      program_weeks: prog.program_weeks?.map((week: any) => ({
+        ...week,
+        program_days: week.program_days?.map((day: any) => ({
+          ...day,
+          program_exercises: day.program_exercises?.map((pe: any) =>
+            pe.id === peId ? { ...pe, ...editValues } : pe
+          ),
+        })),
+      })),
+    })))
+
+    setEditingExercise(null)
+    setEditValues({})
+    setSavingExercise(null)
   }
 
   if (loading) return (
@@ -732,6 +791,9 @@ export default function ClientDetail() {
                   {/* Expanded: program structure with performed weights */}
                   {isExpanded && prog.program_weeks && (
                     <div className="border-t border-zinc-800 px-4 pb-4 pt-3 space-y-3">
+                      <button className="text-xs text-orange-400 bg-orange-500/10 border border-orange-500/20 px-3 py-1.5 rounded-lg hover:bg-orange-500/20 transition font-semibold flex items-center gap-1.5">
+                        ✏️ Programma aanpassen
+                      </button>
                       {prog.program_weeks.map((week: any) => {
                         const days = week.program_days?.sort((a: any, b: any) => a.day_number - b.day_number) ?? []
                         return (
@@ -768,46 +830,142 @@ export default function ClientDetail() {
                                       <div className="space-y-2">
                                         {exercises.map((pe: any, ei: number) => {
                                           const performed = performedByExercise[pe.exercise_id]
-                                          return (
-                                            <div key={pe.id} className="bg-zinc-900/50 rounded-lg p-2">
-                                              <div className="flex items-center justify-between mb-1">
-                                                <div className="flex items-center gap-2">
-                                                  <span className="text-zinc-600 text-[10px] font-bold">{ei + 1}.</span>
-                                                  <button
-                                                    onClick={() => loadExerciseHistory(pe.exercise_id, pe.exercises?.name ?? 'Oefening')}
-                                                    className="text-zinc-300 hover:text-orange-400 transition text-xs font-semibold text-left">
-                                                    {pe.exercises?.name ?? 'Oefening'}
-                                                  </button>
-                                                  <span className="text-zinc-700 text-[10px]">{pe.exercises?.muscle_group ?? ''}</span>
-                                                </div>
-                                                <span className="text-zinc-600 text-[10px]">
-                                                  Plan: {pe.sets}×{pe.reps}{pe.weight_kg ? ` · ${pe.weight_kg}kg` : ''}
-                                                </span>
-                                              </div>
+                                          const isEditing = editingExercise === pe.id
 
-                                              {/* Performed sets */}
-                                              {performed && performed.length > 0 ? (
-                                                <div className="mt-1 space-y-0.5">
-                                                  {performed
-                                                    .sort((a: any, b: any) => a.set_number - b.set_number)
-                                                    .map((set: any, si: number) => (
-                                                    <div key={si} className="flex items-center gap-2 text-[11px]">
-                                                      <span className="text-zinc-700 w-5">S{set.set_number}</span>
-                                                      <span className="text-white font-bold">{set.weight_kg ?? '–'} kg</span>
-                                                      <span className="text-zinc-400">× {set.reps_completed ?? '–'}</span>
-                                                      {set.rpe && (
-                                                        <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
-                                                          set.rpe >= 9.5 ? 'bg-red-500/20 text-red-400' :
-                                                          set.rpe >= 8 ? 'bg-orange-500/20 text-orange-400' :
-                                                          'bg-green-500/20 text-green-400'
-                                                        }`}>RPE {set.rpe}</span>
-                                                      )}
+                                          return (
+                                            <div key={pe.id} className={`rounded-lg p-2 ${isEditing ? 'bg-zinc-800/80 border border-orange-500/30' : 'bg-zinc-900/50'}`}>
+                                              {isEditing ? (
+                                                // Edit form
+                                                <div className="space-y-2">
+                                                  <div className="flex items-center justify-between mb-2">
+                                                    <div className="flex items-center gap-2">
+                                                      <span className="text-zinc-600 text-[10px] font-bold">{ei + 1}.</span>
+                                                      <span className="text-zinc-300 text-xs font-semibold">
+                                                        {pe.exercises?.name ?? 'Oefening'}
+                                                      </span>
                                                     </div>
-                                                  ))}
+                                                  </div>
+
+                                                  <div className="grid grid-cols-5 gap-1.5">
+                                                    <div className="flex flex-col gap-1">
+                                                      <label className="text-[9px] text-zinc-500 font-bold">Sets</label>
+                                                      <input
+                                                        type="number"
+                                                        min="1"
+                                                        value={editValues.sets ?? pe.sets}
+                                                        onChange={(e) => setEditValues({ ...editValues, sets: parseInt(e.target.value) || 1 })}
+                                                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-white text-xs text-center"
+                                                      />
+                                                    </div>
+                                                    <div className="flex flex-col gap-1">
+                                                      <label className="text-[9px] text-zinc-500 font-bold">Reps</label>
+                                                      <input
+                                                        type="number"
+                                                        min="1"
+                                                        value={editValues.reps ?? pe.reps}
+                                                        onChange={(e) => setEditValues({ ...editValues, reps: parseInt(e.target.value) || 1 })}
+                                                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-white text-xs text-center"
+                                                      />
+                                                    </div>
+                                                    <div className="flex flex-col gap-1">
+                                                      <label className="text-[9px] text-zinc-500 font-bold">Kg</label>
+                                                      <input
+                                                        type="number"
+                                                        step="0.5"
+                                                        min="0"
+                                                        value={editValues.weight_kg ?? pe.weight_kg ?? ''}
+                                                        onChange={(e) => setEditValues({ ...editValues, weight_kg: e.target.value ? parseFloat(e.target.value) : null })}
+                                                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-white text-xs text-center"
+                                                      />
+                                                    </div>
+                                                    <div className="flex flex-col gap-1">
+                                                      <label className="text-[9px] text-zinc-500 font-bold">Rest</label>
+                                                      <input
+                                                        type="number"
+                                                        min="0"
+                                                        step="15"
+                                                        value={editValues.rest_seconds ?? pe.rest_seconds ?? ''}
+                                                        onChange={(e) => setEditValues({ ...editValues, rest_seconds: e.target.value ? parseInt(e.target.value) : null })}
+                                                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-white text-xs text-center"
+                                                      />
+                                                    </div>
+                                                    <div className="flex flex-col gap-1">
+                                                      <label className="text-[9px] text-zinc-500 font-bold">Notes</label>
+                                                      <input
+                                                        type="text"
+                                                        value={editValues.notes ?? pe.notes ?? ''}
+                                                        onChange={(e) => setEditValues({ ...editValues, notes: e.target.value })}
+                                                        placeholder="..."
+                                                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-white text-xs text-center placeholder-zinc-600"
+                                                      />
+                                                    </div>
+                                                  </div>
+
+                                                  <div className="flex gap-1.5 mt-2">
+                                                    <button
+                                                      onClick={() => saveExerciseEdit(pe.id)}
+                                                      disabled={savingExercise === pe.id}
+                                                      className="flex-1 text-[10px] text-green-400 bg-green-500/10 border border-green-500/20 px-2 py-1 rounded hover:bg-green-500/20 transition font-semibold disabled:opacity-50">
+                                                      {savingExercise === pe.id ? 'Opslaan...' : '✓ Opslaan'}
+                                                    </button>
+                                                    <button
+                                                      onClick={cancelEdit}
+                                                      className="flex-1 text-[10px] text-zinc-500 bg-zinc-800 border border-zinc-700 px-2 py-1 rounded hover:bg-zinc-700 transition font-semibold">
+                                                      ✕ Annuleren
+                                                    </button>
+                                                  </div>
                                                 </div>
-                                              ) : isDone ? (
-                                                <p className="text-zinc-700 text-[10px] mt-1 italic">Geen sets gelogd</p>
-                                              ) : null}
+                                              ) : (
+                                                // Read-only view
+                                                <>
+                                                  <div className="flex items-center justify-between mb-1">
+                                                    <div className="flex items-center gap-2">
+                                                      <span className="text-zinc-600 text-[10px] font-bold">{ei + 1}.</span>
+                                                      <button
+                                                        onClick={() => loadExerciseHistory(pe.exercise_id, pe.exercises?.name ?? 'Oefening')}
+                                                        className="text-zinc-300 hover:text-orange-400 transition text-xs font-semibold text-left">
+                                                        {pe.exercises?.name ?? 'Oefening'}
+                                                      </button>
+                                                      <span className="text-zinc-700 text-[10px]">{pe.exercises?.muscle_group ?? ''}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                      <span className="text-zinc-600 text-[10px]">
+                                                        Plan: {pe.sets}×{pe.reps}{pe.weight_kg ? ` · ${pe.weight_kg}kg` : ''}
+                                                      </span>
+                                                      <button
+                                                        onClick={() => startEditing(pe)}
+                                                        className="text-zinc-500 hover:text-orange-400 transition text-xs"
+                                                        title="Edit exercise">
+                                                        ✏️
+                                                      </button>
+                                                    </div>
+                                                  </div>
+
+                                                  {/* Performed sets */}
+                                                  {performed && performed.length > 0 ? (
+                                                    <div className="mt-1 space-y-0.5">
+                                                      {performed
+                                                        .sort((a: any, b: any) => a.set_number - b.set_number)
+                                                        .map((set: any, si: number) => (
+                                                        <div key={si} className="flex items-center gap-2 text-[11px]">
+                                                          <span className="text-zinc-700 w-5">S{set.set_number}</span>
+                                                          <span className="text-white font-bold">{set.weight_kg ?? '–'} kg</span>
+                                                          <span className="text-zinc-400">× {set.reps_completed ?? '–'}</span>
+                                                          {set.rpe && (
+                                                            <span className={`px-1 py-0.5 rounded text-[10px] font-bold ${
+                                                              set.rpe >= 9.5 ? 'bg-red-500/20 text-red-400' :
+                                                              set.rpe >= 8 ? 'bg-orange-500/20 text-orange-400' :
+                                                              'bg-green-500/20 text-green-400'
+                                                            }`}>RPE {set.rpe}</span>
+                                                          )}
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  ) : isDone ? (
+                                                    <p className="text-zinc-700 text-[10px] mt-1 italic">Geen sets gelogd</p>
+                                                  ) : null}
+                                                </>
+                                              )}
                                             </div>
                                           )
                                         })}

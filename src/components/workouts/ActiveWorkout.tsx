@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { format, parseISO } from 'date-fns'
 import { nl } from 'date-fns/locale'
 import { TempoDisplay } from './TempoDisplay'
@@ -40,6 +40,14 @@ interface ActiveWorkoutProps {
   onFinish: () => void
   readinessScore?: number | null
   adjustmentReasons?: Record<string, string>
+}
+
+// Map superset group letters to border colors
+const SUPERSET_COLORS: Record<string, string> = {
+  'A': 'border-l-orange-500',
+  'B': 'border-l-blue-500',
+  'C': 'border-l-green-500',
+  'D': 'border-l-purple-500',
 }
 
 /** Generate warm-up sets based on working weight */
@@ -86,6 +94,27 @@ export function ActiveWorkout({
   adjustmentReasons = {},
 }: ActiveWorkoutProps) {
   const [showWarmup, setShowWarmup] = useState<Record<string, boolean>>({})
+
+  // Group exercises by superset
+  const groupedExercises = useMemo(() => {
+    const exercises = day.program_exercises ?? []
+    const groups: Array<{ superset_group: string | null; exercises: any[] }> = []
+    let currentGroup: { superset_group: string | null; exercises: any[] } | null = null
+
+    exercises.forEach((pe: any) => {
+      const supersetGroup = pe.superset_group || null
+
+      // Start new group if superset changes
+      if (!currentGroup || currentGroup.superset_group !== supersetGroup) {
+        if (currentGroup) groups.push(currentGroup)
+        currentGroup = { superset_group: supersetGroup, exercises: [] }
+      }
+      currentGroup.exercises.push(pe)
+    })
+
+    if (currentGroup) groups.push(currentGroup)
+    return groups
+  }, [day.program_exercises])
 
   // Rest timer state
   const [restTimeRemaining, setRestTimeRemaining] = useState<number | null>(null)
@@ -180,35 +209,59 @@ export function ActiveWorkout({
         onAddTime={addTime}
       />
 
-      {day.program_exercises?.map((pe: any, idx: number) => {
-        const prev = previousLogs[pe.exercise_id]
-        const sets = setLogs[pe.id] ?? []
-        const allDone = sets.length > 0 && sets.every(s => s.done)
-        const isPR =
-          personalRecords[pe.exercise_id] &&
-          sets.some(s => s.done && parseFloat(s.weight) >= personalRecords[pe.exercise_id])
-
-        const suggestion = suggestedWeights[pe.exercise_id]
-        const prevWeight = prev?.weight_kg ? parseFloat(String(prev.weight_kg)) : null
-        const hasSuggestion = suggestion && prevWeight && suggestion !== prevWeight
-
-        // Determine working weight for warmup calculation
-        const workingWeight = parseFloat(sets[0]?.weight) || suggestion || prevWeight || 0
-        const warmupSets = generateWarmupSets(workingWeight)
-        const isWarmupOpen = showWarmup[pe.id] ?? false
+      {groupedExercises.map((group, groupIdx) => {
+        const isSupersetGroup = group.superset_group !== null
+        const borderColorClass = isSupersetGroup && group.superset_group ? (SUPERSET_COLORS[group.superset_group] ?? '') : ''
 
         return (
           <div
-            key={pe.id}
-            className={`rounded-2xl border transition-all ${
-              allDone ? 'bg-green-500/5 border-green-500/30' : 'bg-zinc-900 border-zinc-800'
-            }`}
+            key={`group-${groupIdx}`}
+            className={isSupersetGroup ? `border-l-4 ${borderColorClass} pl-4` : ''}
           >
-            <div className="p-4">
+            {isSupersetGroup && (
+              <div className="mb-2 ml-0">
+                <span className={`text-xs font-bold px-2 py-1 rounded-md ${
+                  group.superset_group === 'A' ? 'bg-orange-500/20 text-orange-400' :
+                  group.superset_group === 'B' ? 'bg-blue-500/20 text-blue-400' :
+                  group.superset_group === 'C' ? 'bg-green-500/20 text-green-400' :
+                  'bg-purple-500/20 text-purple-400'
+                }`}>
+                  Superset {group.superset_group}
+                </span>
+              </div>
+            )}
+
+            {group.exercises.map((pe: any, exIdx: number) => {
+              const prev = previousLogs[pe.exercise_id]
+              const sets = setLogs[pe.id] ?? []
+              const allDone = sets.length > 0 && sets.every(s => s.done)
+              const isPR =
+                personalRecords[pe.exercise_id] &&
+                sets.some(s => s.done && parseFloat(s.weight) >= personalRecords[pe.exercise_id])
+
+              const suggestion = suggestedWeights[pe.exercise_id]
+              const prevWeight = prev?.weight_kg ? parseFloat(String(prev.weight_kg)) : null
+              const hasSuggestion = suggestion && prevWeight && suggestion !== prevWeight
+
+              // Determine working weight for warmup calculation
+              const workingWeight = parseFloat(sets[0]?.weight) || suggestion || prevWeight || 0
+              const warmupSets = generateWarmupSets(workingWeight)
+              const isWarmupOpen = showWarmup[pe.id] ?? false
+              const globalIdx = (day.program_exercises ?? []).indexOf(pe) + 1
+              const isNextInSuperset = exIdx < group.exercises.length - 1
+
+              return (
+                <div
+                  key={pe.id}
+                  className={`rounded-2xl border transition-all ${
+                    allDone ? 'bg-green-500/5 border-green-500/30' : 'bg-zinc-900 border-zinc-800'
+                  } ${exIdx > 0 ? 'mt-2' : ''}`}
+                >
+                  <div className="p-4">
               {/* Exercise header */}
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-zinc-600 text-xs font-bold">{idx + 1}</span>
+                  <span className="text-zinc-600 text-xs font-bold">{globalIdx}</span>
                   <p className="text-white font-bold text-sm">{pe.exercises?.name}</p>
                   {pe.exercises?.muscle_group && (
                     <span
@@ -241,8 +294,13 @@ export function ActiveWorkout({
                 muscleGroup={pe.exercises?.muscle_group ?? ''}
               />
 
-              {/* Rest time */}
-              {pe.rest_seconds && (
+              {/* Rest time or direct door label */}
+              {isNextInSuperset ? (
+                <div className="mb-3 flex items-center gap-1.5">
+                  <span className="text-zinc-600 text-xs">↔</span>
+                  <span className="text-zinc-400 text-xs font-bold">Direct door</span>
+                </div>
+              ) : pe.rest_seconds && (
                 <div className="mb-3 flex items-center gap-1.5">
                   <span className="text-zinc-600 text-xs">Rust:</span>
                   <span className="text-zinc-400 text-xs font-bold">{pe.rest_seconds}s</span>
@@ -447,6 +505,9 @@ export function ActiveWorkout({
                 <p className="text-orange-400/70 text-xs mt-3 italic">💬 {pe.notes}</p>
               )}
             </div>
+          </div>
+              )
+            })}
           </div>
         )
       })}

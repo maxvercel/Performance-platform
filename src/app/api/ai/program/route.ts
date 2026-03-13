@@ -102,7 +102,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 3000,
+        max_tokens: 4000,
         system: `Je bent een expert personal trainer. Reageer ALLEEN met valid JSON. Geen tekst, geen markdown. Begin met { en eindig met }.`,
         messages: [{
           role: 'user',
@@ -115,7 +115,8 @@ Coach instructie: ${prompt}
 
 Gebruik EXACT de oefeningen die de coach noemt in de instructie.
 Je mag elke oefeninnaam gebruiken — ook als die nieuw is.
-Vul ALLE ${numDays} dagen in met 5-6 oefeningen per dag.
+Vul ALLE ${numDays} dagen in met 8-12 oefeningen per dag, gegroepeerd in supersets.
+Groepeer oefeningen in supersets (A, B, C, D). Oefeningen met dezelfde superset_group worden direct na elkaar uitgevoerd zonder rust.
 
 Retourneer dit JSON:
 {
@@ -125,11 +126,14 @@ Retourneer dit JSON:
       "day_number": ${d.day_number},
       "label": "${d.dag}",
       "exercises": [
-        {"name": "OEFENING", "sets": 4, "reps": "8-10", "weight_kg": null, "rest_seconds": 90, "notes": "RPE 7"},
-        {"name": "OEFENING", "sets": 4, "reps": "8-10", "weight_kg": null, "rest_seconds": 90, "notes": "RPE 7"},
-        {"name": "OEFENING", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 6"},
-        {"name": "OEFENING", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 6"},
-        {"name": "OEFENING", "sets": 3, "reps": "12-15", "weight_kg": null, "rest_seconds": 60, "notes": "RPE 6"}
+        {"name": "Bench Press", "sets": 4, "reps": "8-10", "weight_kg": null, "rest_seconds": 90, "notes": "RPE 7", "superset_group": "A"},
+        {"name": "Bent Over Row", "sets": 4, "reps": "8-10", "weight_kg": null, "rest_seconds": 90, "notes": "RPE 7, superset met Bench Press", "superset_group": "A"},
+        {"name": "Overhead Press", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 7", "superset_group": "B"},
+        {"name": "Lat Pulldown", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 7, superset", "superset_group": "B"},
+        {"name": "Dumbbell Flyes", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 60, "notes": "RPE 6", "superset_group": "C"},
+        {"name": "Face Pulls", "sets": 3, "reps": "12-15", "weight_kg": null, "rest_seconds": 60, "notes": "RPE 6, superset", "superset_group": "C"},
+        {"name": "Barbell Curls", "sets": 3, "reps": "8-10", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 6", "superset_group": "D"},
+        {"name": "Tricep Dips", "sets": 3, "reps": "8-10", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 6, superset", "superset_group": "D"}
       ]
     }`).join(',\n    ')}
   ]
