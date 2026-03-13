@@ -926,7 +926,9 @@ export default function ClientDetail() {
                                                         className="text-zinc-300 hover:text-orange-400 transition text-xs font-semibold text-left">
                                                         {pe.exercises?.name ?? 'Oefening'}
                                                       </button>
-                                                      <span className="text-zinc-700 text-[10px]">{pe.exercises?.muscle_group ?? ''}</span>
+                                                      {pe.exercises?.muscle_group && pe.exercises.muscle_group !== 'general' && (
+                                                        <span className="text-zinc-700 text-[10px]">{pe.exercises.muscle_group}</span>
+                                                      )}
                                                     </div>
                                                     <div className="flex items-center gap-1.5">
                                                       <span className="text-zinc-600 text-[10px]">
