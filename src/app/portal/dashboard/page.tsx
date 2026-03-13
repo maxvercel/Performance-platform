@@ -326,22 +326,22 @@ export default function DashboardPage() {
                 {dailyHabitStreak} dag{dailyHabitStreak !== 1 ? 'en' : ''} op rij 100% voltooid
               </p>
             )}
-            <div className="space-y-2">
+            <div className="space-y-0.5">
               {todayHabitsList.map(habit => (
                 <button
                   key={habit.id}
                   onClick={() => toggleHabit(habit.id, habit.completed)}
-                  className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-zinc-800 transition active:bg-zinc-700"
+                  className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-zinc-800/50 transition active:bg-zinc-700"
                 >
                   <input
                     type="checkbox"
                     checked={habit.completed}
                     onChange={() => {}}
-                    className="w-4 h-4 rounded accent-orange-500 cursor-pointer"
+                    className="w-3.5 h-3.5 rounded accent-orange-500 cursor-pointer flex-shrink-0"
                     onClick={e => e.stopPropagation()}
                   />
-                  <span className="text-lg">{habit.icon ?? '⭐'}</span>
-                  <span className={`flex-1 text-sm ${habit.completed ? 'text-zinc-500 line-through' : 'text-white'}`}>
+                  <span className="text-sm flex-shrink-0">{habit.icon ?? '⭐'}</span>
+                  <span className={`text-left text-xs ${habit.completed ? 'text-zinc-500 line-through' : 'text-white'}`}>
                     {habit.name}
                   </span>
                 </button>
