@@ -96,14 +96,21 @@ export default function TemplateEditorPage() {
     }
     setSavedExercises(exMap)
 
-    // Load coach's clients
-    const { data: clientList } = await supabase
-      .from('profiles')
-      .select('id, full_name')
+    // Load coach's clients via coach_client relation table
+    const { data: relations } = await supabase
+      .from('coach_client')
+      .select('client_id')
       .eq('coach_id', user.id)
-      .eq('role', 'client')
-      .order('full_name')
-    setClients(clientList ?? [])
+      .eq('active', true)
+    const clientIds = (relations ?? []).map((r: any) => r.client_id)
+    if (clientIds.length > 0) {
+      const { data: clientList } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', clientIds)
+        .order('full_name')
+      setClients(clientList ?? [])
+    }
 
     setLoading(false)
   }
