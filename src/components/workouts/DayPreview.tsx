@@ -37,11 +37,12 @@ export function DayPreview({
   saving,
   onStartWorkout,
 }: DayPreviewProps) {
-  // Collect muscle groups for body map
+  // Collect muscle groups for body map (excluding 'general')
   const muscleGroups = useMemo(() => {
     const groups = new Set<string>()
     day.program_exercises?.forEach((pe: any) => {
-      if (pe.exercises?.muscle_group) groups.add(pe.exercises.muscle_group)
+      const mg = pe.exercises?.muscle_group
+      if (mg && mg !== 'general') groups.add(mg)
     })
     return Array.from(groups)
   }, [day.program_exercises])
@@ -133,7 +134,7 @@ export function DayPreview({
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-zinc-600 text-xs font-bold">{globalIdx}</span>
                     <p className="text-white font-bold text-sm">{pe.exercises?.name}</p>
-                    {pe.exercises?.muscle_group && (
+                    {pe.exercises?.muscle_group && pe.exercises.muscle_group !== 'general' && (
                       <span
                         className={`text-xs font-medium ${
                           MUSCLE_GROUP_COLORS[pe.exercises.muscle_group] ?? 'text-zinc-500'

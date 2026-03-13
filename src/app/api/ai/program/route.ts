@@ -118,7 +118,7 @@ Je mag elke oefeninnaam gebruiken — ook als die nieuw is.
 Vul ALLE ${numDays} dagen in met 8-12 oefeningen per dag, gegroepeerd in supersets.
 Groepeer oefeningen in supersets (A, B, C, D). Oefeningen met dezelfde superset_group worden direct na elkaar uitgevoerd zonder rust.
 
-Retourneer dit JSON:
+Retourneer dit JSON. Voor elke oefening: zet muscle_group op een van deze Nederlandse spiergroupes: "Borst", "Rug", "Benen", "Schouders", "Armen", "Core", "Billen", "Cardio":
 {
   "week_number": ${week.week},
   "days": [
@@ -126,14 +126,14 @@ Retourneer dit JSON:
       "day_number": ${d.day_number},
       "label": "${d.dag}",
       "exercises": [
-        {"name": "Bench Press", "sets": 4, "reps": "8-10", "weight_kg": null, "rest_seconds": 90, "notes": "RPE 7", "superset_group": "A"},
-        {"name": "Bent Over Row", "sets": 4, "reps": "8-10", "weight_kg": null, "rest_seconds": 90, "notes": "RPE 7, superset met Bench Press", "superset_group": "A"},
-        {"name": "Overhead Press", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 7", "superset_group": "B"},
-        {"name": "Lat Pulldown", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 7, superset", "superset_group": "B"},
-        {"name": "Dumbbell Flyes", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 60, "notes": "RPE 6", "superset_group": "C"},
-        {"name": "Face Pulls", "sets": 3, "reps": "12-15", "weight_kg": null, "rest_seconds": 60, "notes": "RPE 6, superset", "superset_group": "C"},
-        {"name": "Barbell Curls", "sets": 3, "reps": "8-10", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 6", "superset_group": "D"},
-        {"name": "Tricep Dips", "sets": 3, "reps": "8-10", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 6, superset", "superset_group": "D"}
+        {"name": "Bench Press", "sets": 4, "reps": "8-10", "weight_kg": null, "rest_seconds": 90, "notes": "RPE 7", "superset_group": "A", "muscle_group": "Borst"},
+        {"name": "Bent Over Row", "sets": 4, "reps": "8-10", "weight_kg": null, "rest_seconds": 90, "notes": "RPE 7, superset met Bench Press", "superset_group": "A", "muscle_group": "Rug"},
+        {"name": "Overhead Press", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 7", "superset_group": "B", "muscle_group": "Schouders"},
+        {"name": "Lat Pulldown", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 7, superset", "superset_group": "B", "muscle_group": "Rug"},
+        {"name": "Dumbbell Flyes", "sets": 3, "reps": "10-12", "weight_kg": null, "rest_seconds": 60, "notes": "RPE 6", "superset_group": "C", "muscle_group": "Borst"},
+        {"name": "Face Pulls", "sets": 3, "reps": "12-15", "weight_kg": null, "rest_seconds": 60, "notes": "RPE 6, superset", "superset_group": "C", "muscle_group": "Schouders"},
+        {"name": "Barbell Curls", "sets": 3, "reps": "8-10", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 6", "superset_group": "D", "muscle_group": "Armen"},
+        {"name": "Tricep Dips", "sets": 3, "reps": "8-10", "weight_kg": null, "rest_seconds": 75, "notes": "RPE 6, superset", "superset_group": "D", "muscle_group": "Armen"}
       ]
     }`).join(',\n    ')}
   ]
@@ -166,7 +166,7 @@ Retourneer dit JSON:
           if (!ex.name) continue
           const { data: existing } = await supabase
             .from('exercises')
-            .select('id')
+            .select('id, muscle_group')
             .ilike('name', ex.name.trim())
             .limit(1)
             .maybeSingle()
@@ -174,9 +174,15 @@ Retourneer dit JSON:
             await supabase.from('exercises').insert({
               name: ex.name.trim(),
               category: 'general',
-              muscle_group: 'general',
+              muscle_group: ex.muscle_group || 'general',
               is_global: true,
             })
+          } else if (existing.muscle_group === 'general' && ex.muscle_group) {
+            // Update existing exercise if it has 'general' and we have better data
+            await supabase
+              .from('exercises')
+              .update({ muscle_group: ex.muscle_group })
+              .eq('id', existing.id)
           }
         }
       }

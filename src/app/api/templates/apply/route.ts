@@ -35,6 +35,7 @@ export async function POST(request: Request) {
       rest_seconds: number | null
       notes: string | null
       superset_group: string | null
+      muscle_group?: string | null
     }>>
     weeks: Array<{
       week_number: number
@@ -138,20 +139,27 @@ export async function POST(request: Request) {
 
         const { data: existing } = await supabase
           .from('exercises')
-          .select('id')
+          .select('id, muscle_group')
           .ilike('name', ex.name.trim())
           .limit(1)
           .maybeSingle()
 
         if (existing) {
           exerciseId = existing.id
+          // If exercise exists with 'general' muscle_group and we have better data, update it
+          if (existing.muscle_group === 'general' && ex.muscle_group) {
+            await supabase
+              .from('exercises')
+              .update({ muscle_group: ex.muscle_group })
+              .eq('id', existing.id)
+          }
         } else {
           const { data: created } = await supabase
             .from('exercises')
             .insert({
               name: ex.name.trim(),
               category: 'general',
-              muscle_group: 'general',
+              muscle_group: ex.muscle_group || 'general',
               is_global: true,
             })
             .select('id').single()
