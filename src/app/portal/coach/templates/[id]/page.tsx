@@ -170,18 +170,31 @@ export default function TemplateEditorPage() {
       }
 
       const data = await res.json()
+
+      // Show warnings if any
+      if (data.warnings?.length > 0) {
+        setAiError(`Waarschuwingen: ${data.warnings.join('; ')}`)
+      }
+
       if (data.program?.weeks) {
         // Map AI response to savedExercises per day
         const newExMap: Record<string, any[]> = { ...savedExercises }
+        let totalMapped = 0
         for (const genWeek of data.program.weeks) {
           const matchingWeek = weeks.find((w: any) => w.week_number === genWeek.week_number)
-          if (!matchingWeek) continue
+          if (!matchingWeek) {
+            console.warn('No matching week for', genWeek.week_number, 'available:', weeks.map((w: any) => w.week_number))
+            continue
+          }
           for (const genDay of genWeek.days ?? []) {
             const matchingDay = matchingWeek.template_days.find(
               (d: any) => d.day_number === genDay.day_number && !d.rest_day
             )
-            if (!matchingDay) continue
-            newExMap[matchingDay.id] = (genDay.exercises ?? []).map((ex: any, i: number) => ({
+            if (!matchingDay) {
+              console.warn('No matching day for', genDay.day_number, 'in week', genWeek.week_number)
+              continue
+            }
+            const exercises = (genDay.exercises ?? []).map((ex: any, i: number) => ({
               name: ex.name,
               sets: ex.sets ?? 3,
               reps: ex.reps ?? '8-10',
@@ -191,9 +204,17 @@ export default function TemplateEditorPage() {
               superset_group: ex.superset_group ?? null,
               order_index: i,
             }))
+            newExMap[matchingDay.id] = exercises
+            totalMapped += exercises.length
           }
         }
         setSavedExercises(newExMap)
+
+        if (totalMapped === 0) {
+          setAiError('AI heeft geen oefeningen gegenereerd. Controleer je prompt en probeer het opnieuw.')
+        }
+      } else {
+        setAiError(data.error || 'Geen programma ontvangen van de AI')
       }
     } catch (err: any) {
       setAiError(err.message || 'Er ging iets mis met de AI')

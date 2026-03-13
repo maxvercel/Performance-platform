@@ -30,6 +30,15 @@ export async function POST(request: Request) {
     )
   }
 
+  // Check API key exists
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error('ANTHROPIC_API_KEY is not set in environment variables')
+    return NextResponse.json(
+      { error: 'AI service niet geconfigureerd. Stel de ANTHROPIC_API_KEY in bij Vercel Environment Variables.' },
+      { status: 500 }
+    )
+  }
+
   // Validate request body
   let body: unknown
   try {
@@ -44,6 +53,8 @@ export async function POST(request: Request) {
   }
 
   const { prompt, program, templateName, mode } = validation.data
+
+  console.log(`AI request: mode=${mode}, template="${templateName}", weeks=${program.length}, prompt length=${prompt.length}`)
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -79,13 +90,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ response: data.content?.[0]?.text ?? '' })
   }
 
-  // Build mode — week by week
-  const allWeeks = []
+  // Build mode — all weeks in PARALLEL for speed
   const totalWeeks = program.length
+  const errors: string[] = []
 
-  for (const week of program) {
+  console.log(`Building program: ${totalWeeks} weeks, days per week: ${program.map(w => w.days.length).join(',')}`)
+
+  // Generate all weeks in parallel to avoid Vercel timeout
+  const weekPromises = program.map(async (week) => {
     const numDays = week.days.length
-    const dayLabels = week.days.map((d) => `dag ${d.day_number}: ${d.dag}`).join(', ')
+    const dayLabels = week.days.map((d: any) => `dag ${d.day_number}: ${d.dag}`).join(', ')
 
     const progressie =
       week.week <= 2 ? 'Opbouwfase: RPE 6-7, 3 sets per oefening' :
@@ -93,17 +107,18 @@ export async function POST(request: Request) {
       week.week === 5 ? 'Piekfase: RPE 8-9, 4-5 sets per oefening' :
       'Deload: RPE 5-6, 2-3 sets, minder volume'
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY!,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 4000,
-        system: `Je bent een expert personal trainer. Reageer ALLEEN met valid JSON. Geen tekst, geen markdown. Begin met { en eindig met }.
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY!,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 4000,
+          system: `Je bent een expert personal trainer. Reageer ALLEEN met valid JSON. Geen tekst, geen markdown. Begin met { en eindig met }.
 
 KRITIEKE REGELS:
 1. Gebruik EXACT de oefeningen en volgorde die de coach noemt. Verzin GEEN eigen oefeningen.
@@ -112,9 +127,9 @@ KRITIEKE REGELS:
 4. Als de coach week-specifieke reps/progressie noemt (bijv. "week 1-2: 12, week 3-4: 15"), pas dit aan per week.
 5. Behoud tempo notaties, zijde-aanduidingen en alle details in de notes.
 6. Zet muscle_group op: "Borst", "Rug", "Benen", "Schouders", "Armen", "Core", "Billen" of "Cardio".`,
-        messages: [{
-          role: 'user',
-          content: `Programma: ${templateName}
+          messages: [{
+            role: 'user',
+            content: `Programma: ${templateName}
 Week: ${week.week} van ${totalWeeks}
 Progressie: ${progressie}
 Dagen: ${numDays} (${dayLabels})
@@ -132,7 +147,7 @@ Retourneer ALLEEN dit JSON formaat:
 {
   "week_number": ${week.week},
   "days": [
-    ${week.days.map((d) => `{
+    ${week.days.map((d: any) => `{
       "day_number": ${d.day_number},
       "label": "${d.dag}",
       "exercises": [
@@ -145,29 +160,30 @@ Retourneer ALLEEN dit JSON formaat:
     }`).join(',\n    ')}
   ]
 }`
-        }]
+          }]
+        })
       })
-    })
 
-    if (!response.ok) {
-      console.error(`Anthropic API error (week ${week.week}):`, response.status)
-      allWeeks.push({
-        week_number: week.week,
-        days: week.days.map((d) => ({
-          day_number: d.day_number, label: d.dag, exercises: []
-        }))
-      })
-      continue
-    }
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => '')
+        console.error(`Anthropic API error (week ${week.week}): status=${response.status}, body=${errBody.substring(0, 500)}`)
+        errors.push(`Week ${week.week}: Anthropic API error ${response.status}`)
+        return {
+          week_number: week.week,
+          days: week.days.map((d: any) => ({
+            day_number: d.day_number, label: d.dag, exercises: []
+          }))
+        }
+      }
 
-    const data = await response.json()
-    const text = data.content?.[0]?.text ?? ''
+      const data = await response.json()
+      const text = data.content?.[0]?.text ?? ''
+      console.log(`Week ${week.week} AI response length: ${text.length} chars`)
 
-    try {
       const clean = text.replace(/```json/g, '').replace(/```/g, '').trim()
       const parsed = JSON.parse(clean)
 
-      // Auto-create new exercises in the database
+      // Auto-create new exercises in the database (fire and forget)
       for (const day of parsed.days) {
         for (const ex of day.exercises) {
           if (!ex.name) continue
@@ -185,7 +201,6 @@ Retourneer ALLEEN dit JSON formaat:
               is_global: true,
             })
           } else if (existing.muscle_group === 'general' && ex.muscle_group) {
-            // Update existing exercise if it has 'general' and we have better data
             await supabase
               .from('exercises')
               .update({ muscle_group: ex.muscle_group })
@@ -194,17 +209,37 @@ Retourneer ALLEEN dit JSON formaat:
         }
       }
 
-      allWeeks.push(parsed)
-    } catch {
-      console.error(`Week ${week.week} parse error:`, text.substring(0, 300))
-      allWeeks.push({
+      return parsed
+    } catch (err: any) {
+      console.error(`Week ${week.week} error:`, err.message ?? err)
+      errors.push(`Week ${week.week}: ${err.message ?? 'Onbekende fout'}`)
+      return {
         week_number: week.week,
-        days: week.days.map((d) => ({
+        days: week.days.map((d: any) => ({
           day_number: d.day_number, label: d.dag, exercises: []
         }))
-      })
+      }
     }
+  })
+
+  const allWeeks = await Promise.all(weekPromises)
+  // Sort by week number to ensure correct order
+  allWeeks.sort((a, b) => a.week_number - b.week_number)
+
+  const totalExercises = allWeeks.reduce((sum, w) =>
+    sum + (w.days?.reduce((ds: number, d: any) => ds + (d.exercises?.length ?? 0), 0) ?? 0), 0)
+
+  console.log(`AI build complete: ${allWeeks.length} weeks, ${totalExercises} total exercises, ${errors.length} errors`)
+
+  if (errors.length > 0 && totalExercises === 0) {
+    return NextResponse.json({
+      error: `AI generatie mislukt: ${errors.join('; ')}`,
+      program: { weeks: allWeeks }
+    }, { status: 502 })
   }
 
-  return NextResponse.json({ program: { weeks: allWeeks } })
+  return NextResponse.json({
+    program: { weeks: allWeeks },
+    ...(errors.length > 0 ? { warnings: errors } : {})
+  })
 }
