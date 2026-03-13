@@ -228,14 +228,27 @@ export default function ProgressPage() {
 
   async function saveRun() {
     if (!profile) return
+
+    // Validate inputs
+    const distance = parseFloat(runForm.distance_km)
+    const durationMin = parseInt(runForm.duration_min) || 0
+    const durationSec = parseInt(runForm.duration_sec) || 0
+    const heartRate = parseInt(runForm.avg_heart_rate) || 0
+
+    if (!runForm.date) { alert('Vul een datum in.'); return }
+    if (isNaN(distance) || distance <= 0 || distance > 200) { alert('Vul een geldige afstand in (0-200 km).'); return }
+    if (durationMin < 0 || durationSec < 0) { alert('Duur mag niet negatief zijn.'); return }
+    if (durationMin === 0 && durationSec === 0) { alert('Vul een duur in.'); return }
+    if (heartRate && (heartRate < 30 || heartRate > 250)) { alert('Hartslag moet tussen 30-250 bpm zijn.'); return }
+
     setSavingRun(true)
-    const totalSeconds = (parseInt(runForm.duration_min) || 0) * 60 + (parseInt(runForm.duration_sec) || 0)
+    const totalSeconds = durationMin * 60 + durationSec
     await supabase.from('cardio_logs').insert({
       client_id: profile.id,
       logged_at: runForm.date,
-      distance_km: parseFloat(runForm.distance_km) || null,
-      duration_seconds: totalSeconds || null,
-      avg_heart_rate: parseInt(runForm.avg_heart_rate) || null,
+      distance_km: distance,
+      duration_seconds: totalSeconds,
+      avg_heart_rate: heartRate || null,
       notes: runForm.notes || null,
       activity_type: runForm.run_type,
     })
@@ -246,6 +259,7 @@ export default function ProgressPage() {
   }
 
   async function deleteRun(id: string) {
+    if (!confirm('Weet je zeker dat je deze activiteit wilt verwijderen?')) return
     await supabase.from('cardio_logs').delete().eq('id', id)
     setRuns(prev => prev.filter(r => r.id !== id))
   }
@@ -258,15 +272,36 @@ export default function ProgressPage() {
       .select('*')
       .eq('client_id', userId)
       .order('taken_at', { ascending: false })
+      .limit(50)
     setPhotos(data ?? [])
   }
 
   async function uploadPhoto(file: File, category: 'front' | 'side' | 'back', notes: string) {
     if (!profile) return
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic']
+    if (!allowedTypes.includes(file.type)) {
+      throw new Error('Alleen afbeeldingen (JPG, PNG, WebP) zijn toegestaan.')
+    }
+
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024
+    if (file.size > maxSize) {
+      throw new Error('Bestand is te groot. Maximaal 10 MB.')
+    }
+
+    // Validate total photo count (max 50)
+    if (photos.length >= 50) {
+      throw new Error('Maximaal 50 foto\'s. Verwijder eerst een oude foto.')
+    }
+
     setUploadingPhoto(true)
 
-    const ext = file.name.split('.').pop()
-    const fileName = `${profile.id}/${Date.now()}.${ext}`
+    const allowedExts = ['jpg', 'jpeg', 'png', 'webp', 'heic']
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg'
+    const safeExt = allowedExts.includes(ext) ? ext : 'jpg'
+    const fileName = `${profile.id}/${Date.now()}.${safeExt}`
 
     const { data: uploaded, error: uploadErr } = await supabase.storage
       .from('progress-photos')
@@ -294,6 +329,7 @@ export default function ProgressPage() {
   }
 
   async function deletePhoto(id: string) {
+    if (!confirm('Weet je zeker dat je deze foto wilt verwijderen?')) return
     await supabase.from('progress_photos').delete().eq('id', id)
     setPhotos(prev => prev.filter(p => p.id !== id))
   }

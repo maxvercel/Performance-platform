@@ -124,6 +124,7 @@ export function ActiveWorkout({
   const prevCompletedRef = useRef(completedSets)
 
   // Auto-start rest timer when a set is completed
+  // IMPORTANT: Don't start timer within supersets (rest_seconds = 0 means "direct door")
   useEffect(() => {
     if (completedSets > prevCompletedRef.current && completedSets < totalSets) {
       // Find the rest seconds for the current exercise
@@ -136,9 +137,12 @@ export function ActiveWorkout({
           break
         }
       }
-      setRestTotalSeconds(restSec)
-      setRestTimeRemaining(restSec)
-      setRestIsActive(true)
+      // Only start timer if rest > 0 (superset exercises have rest_seconds = 0)
+      if (restSec > 0) {
+        setRestTotalSeconds(restSec)
+        setRestTimeRemaining(restSec)
+        setRestIsActive(true)
+      }
     }
     prevCompletedRef.current = completedSets
   }, [completedSets, totalSets, day.program_exercises, setLogs])
