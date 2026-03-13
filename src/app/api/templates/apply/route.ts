@@ -62,14 +62,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Template niet gevonden of geen toegang' }, { status: 403 })
   }
 
-  // Verify client belongs to this coach
-  const { data: clientProfile } = await supabase
-    .from('profiles')
-    .select('id, coach_id')
-    .eq('id', clientId)
-    .single()
+  // Verify client belongs to this coach via coach_client table
+  const { data: relation } = await supabase
+    .from('coach_client')
+    .select('id')
+    .eq('coach_id', user.id)
+    .eq('client_id', clientId)
+    .eq('active', true)
+    .maybeSingle()
 
-  if (!clientProfile || clientProfile.coach_id !== user.id) {
+  if (!relation) {
     return NextResponse.json({ error: 'Client niet gevonden of geen toegang' }, { status: 403 })
   }
 
