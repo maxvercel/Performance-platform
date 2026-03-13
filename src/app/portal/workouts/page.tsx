@@ -60,6 +60,8 @@ export default function WorkoutsPage() {
         .select('id')
         .eq('client_id', userId)
         .not('completed_at', 'is', null)
+        .order('logged_at', { ascending: false })
+        .limit(50)
 
       const completedIds = completedWorkouts?.map((w: any) => w.id) ?? []
       if (completedIds.length === 0) return {}
@@ -227,7 +229,9 @@ export default function WorkoutsPage() {
         .from('workout_logs')
         .select('id')
         .eq('client_id', profile.id)
-        .not('completed_at', 'is', null),
+        .not('completed_at', 'is', null)
+        .order('logged_at', { ascending: false })
+        .limit(200),
       supabase
         .from('daily_readiness')
         .select('readiness_score')

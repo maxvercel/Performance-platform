@@ -25,6 +25,7 @@ import StravaConnect from '@/components/progress/StravaConnect'
 import { BodyMap } from '@/components/ui/BodyMap'
 
 import type { WorkoutLog, ExerciseLog } from '@/types'
+import { compressImage } from '@/utils/imageCompression'
 
 type Tab = 'kracht' | 'cardio' | 'programmas' | 'fotos'
 
@@ -353,14 +354,17 @@ export default function ProgressPage() {
 
     setUploadingPhoto(true)
 
+    // Compress image client-side (saves ~60-80% storage)
+    const compressed = await compressImage(file)
+
     const allowedExts = ['jpg', 'jpeg', 'png', 'webp', 'heic']
-    const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg'
+    const ext = compressed.name.split('.').pop()?.toLowerCase() ?? 'jpg'
     const safeExt = allowedExts.includes(ext) ? ext : 'jpg'
     const fileName = `${profile.id}/${Date.now()}.${safeExt}`
 
     const { data: uploaded, error: uploadErr } = await supabase.storage
       .from('progress-photos')
-      .upload(fileName, file)
+      .upload(fileName, compressed)
 
     if (uploadErr) {
       setUploadingPhoto(false)

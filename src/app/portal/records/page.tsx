@@ -35,12 +35,14 @@ export default function RecordsPage() {
   async function loadRecords() {
     if (!profile) return
 
-    // Step 1: Get all completed workout_log IDs for this user
+    // Step 1: Get recent completed workout_log IDs (last 200 for performance)
     const { data: workoutLogs } = await supabase
       .from('workout_logs')
       .select('id, logged_at')
       .eq('client_id', profile.id)
       .not('completed_at', 'is', null)
+      .order('logged_at', { ascending: false })
+      .limit(200)
 
     const wlIds = workoutLogs?.map(wl => wl.id) ?? []
     if (wlIds.length === 0) {
