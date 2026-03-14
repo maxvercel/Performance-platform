@@ -555,7 +555,7 @@ export function ActiveWorkout({
                         <div className="flex items-center gap-1.5 ml-8">
                           <span className="text-zinc-600 text-[10px] font-bold w-8">RPE</span>
                           <div className="flex gap-0.5">
-                            {[6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10].map(rpeVal => {
+                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(rpeVal => {
                               const selected = parseFloat(set.rpe) === rpeVal
                               return (
                                 <button
@@ -564,13 +564,13 @@ export function ActiveWorkout({
                                   aria-label={`RPE ${rpeVal}`}
                                   className={`h-6 rounded text-[10px] font-bold transition px-1.5 ${
                                     selected
-                                      ? rpeVal >= 9.5 ? 'bg-red-500/30 text-red-300 border border-red-500/50'
-                                      : rpeVal >= 8 ? 'bg-orange-500/30 text-orange-300 border border-orange-500/50'
+                                      ? rpeVal >= 9 ? 'bg-red-500/30 text-red-300 border border-red-500/50'
+                                      : rpeVal >= 7 ? 'bg-orange-500/30 text-orange-300 border border-orange-500/50'
                                       : 'bg-green-500/30 text-green-300 border border-green-500/50'
                                       : 'bg-zinc-800 text-zinc-600 hover:bg-zinc-700'
                                   }`}
                                 >
-                                  {rpeVal % 1 === 0 ? rpeVal : rpeVal.toFixed(1)}
+                                  {rpeVal}
                                 </button>
                               )
                             })}
