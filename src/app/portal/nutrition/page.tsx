@@ -94,6 +94,7 @@ export default function NutritionPage() {
   const [searchResults, setSearchResults] = useState<FoodSearchResult[]>([])
   const [recentItems, setRecentItems] = useState<RecentItem[]>([])
   const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
   const [showPortionModal, setShowPortionModal] = useState(false)
   const [selectedSearchItem, setSelectedSearchItem] = useState<FoodSearchResult | null>(null)
   const [portionSize, setPortionSize] = useState('100')
@@ -228,11 +229,14 @@ export default function NutritionPage() {
   async function performSearch(query: string) {
     try {
       const response = await fetch(`/api/nutrition/search?q=${encodeURIComponent(query)}`)
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json()
       setSearchResults(data.results || [])
+      setSearchError(null)
     } catch (error) {
       console.error('Search failed:', error)
       setSearchResults([])
+      setSearchError('Zoeken mislukt. Controleer je verbinding.')
     } finally {
       setSearching(false)
     }
@@ -605,7 +609,13 @@ export default function NutritionPage() {
                   </div>
                 )}
 
-                {searchQuery && !searching && searchResults.length === 0 && (
+                {searchError && (
+                  <div className="mt-3 text-center text-red-400 text-xs bg-red-500/10 border border-red-500/20 rounded-xl py-2 px-3">
+                    {searchError}
+                  </div>
+                )}
+
+                {searchQuery && !searching && !searchError && searchResults.length === 0 && (
                   <div className="mt-3 text-center text-zinc-600 text-xs">Geen resultaten gevonden</div>
                 )}
               </div>
@@ -684,8 +694,15 @@ export default function NutritionPage() {
                   <input
                     type="number"
                     inputMode="numeric"
+                    min="1"
+                    max="9999"
                     value={portionSize}
-                    onChange={e => setPortionSize(e.target.value)}
+                    onChange={e => {
+                      const val = e.target.value
+                      if (val === '' || (parseInt(val) >= 0 && parseInt(val) <= 9999)) {
+                        setPortionSize(val)
+                      }
+                    }}
                     className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-white text-sm focus:outline-none focus:border-orange-500"
                   />
                   <span className="text-zinc-500 text-xs font-bold">g</span>

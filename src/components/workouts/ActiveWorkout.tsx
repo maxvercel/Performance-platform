@@ -125,28 +125,63 @@ export function ActiveWorkout({
   const prevCompletedRef = useRef(completedSets)
 
   // Auto-start rest timer when a set is completed
-  // IMPORTANT: Don't start timer within supersets (rest_seconds = 0 means "direct door")
+  // IMPORTANT: Skip timer for superset exercises — user goes "direct door" to next exercise
   useEffect(() => {
     if (completedSets > prevCompletedRef.current && completedSets < totalSets) {
-      // Find the rest seconds for the current exercise
       const allPes = day.program_exercises ?? []
-      let restSec = 90
+
+      // Find the exercise that was just worked on (has some done sets but not all)
+      let currentPe: any = null
       for (const pe of allPes) {
         const sets = setLogs[pe.id] ?? []
         if (sets.some(s => s.done) && !sets.every(s => s.done)) {
-          restSec = pe.rest_seconds ?? 90
+          currentPe = pe
           break
         }
       }
-      // Only start timer if rest > 0 (superset exercises have rest_seconds = 0)
-      if (restSec > 0) {
-        setRestTotalSeconds(restSec)
-        setRestTimeRemaining(restSec)
-        setRestIsActive(true)
+
+      // If no partially-complete exercise found, check if the last set of an exercise was just finished
+      if (!currentPe) {
+        for (const pe of allPes) {
+          const sets = setLogs[pe.id] ?? []
+          if (sets.length > 0 && sets.every(s => s.done)) {
+            currentPe = pe
+            // Keep searching — we want the most recently completed exercise
+          }
+        }
+      }
+
+      // Determine if we're inside a superset and the next exercise is in the same group
+      let skipTimerForSuperset = false
+      if (currentPe?.superset_group) {
+        const group = groupedExercises.find(g => g.superset_group === currentPe.superset_group)
+        if (group) {
+          const exIdx = group.exercises.findIndex((e: any) => e.id === currentPe.id)
+          const hasNextInSuperset = exIdx >= 0 && exIdx < group.exercises.length - 1
+
+          if (hasNextInSuperset) {
+            // Check if the next exercise in the superset still has incomplete sets
+            const nextPe = group.exercises[exIdx + 1]
+            const nextSets = setLogs[nextPe.id] ?? []
+            const nextHasIncompleteSets = nextSets.some((s: any) => !s.done)
+            if (nextHasIncompleteSets) {
+              skipTimerForSuperset = true
+            }
+          }
+        }
+      }
+
+      if (!skipTimerForSuperset) {
+        const restSec = currentPe?.rest_seconds ?? 90
+        if (restSec > 0) {
+          setRestTotalSeconds(restSec)
+          setRestTimeRemaining(restSec)
+          setRestIsActive(true)
+        }
       }
     }
     prevCompletedRef.current = completedSets
-  }, [completedSets, totalSets, day.program_exercises, setLogs])
+  }, [completedSets, totalSets, day.program_exercises, setLogs, groupedExercises])
 
   // Timer countdown
   useEffect(() => {

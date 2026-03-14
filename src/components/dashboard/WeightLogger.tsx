@@ -7,18 +7,28 @@ export default function WeightLogger({ userId, onSaved }: { userId: string, onSa
   const [weight, setWeight] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function saveWeight() {
     if (!weight || isNaN(parseFloat(weight))) return
     setSaving(true)
+    setError(null)
 
-    await supabase.from('progress_metrics').insert({
+    const { error: insertError } = await supabase.from('progress_metrics').insert({
       client_id: userId,
       weight_kg: parseFloat(weight),
       logged_at: new Date().toISOString().split('T')[0]
     })
 
     setSaving(false)
+
+    if (insertError) {
+      console.error('Weight save error:', insertError)
+      setError('Opslaan mislukt, probeer opnieuw')
+      setTimeout(() => setError(null), 3000)
+      return
+    }
+
     setSaved(true)
     setWeight('')
     onSaved()
@@ -56,6 +66,9 @@ export default function WeightLogger({ userId, onSaved }: { userId: string, onSa
           {saving ? '...' : saved ? '✓' : 'Opslaan'}
         </button>
       </div>
+      {error && (
+        <p className="text-red-400 text-xs mt-2">{error}</p>
+      )}
     </div>
   )
 }

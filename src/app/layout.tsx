@@ -29,10 +29,16 @@ export const metadata: Metadata = {
     statusBarStyle: 'black-translucent',
     title: '9toFit',
   },
-  metadataBase: new URL('https://9tofit.app'),
+  metadataBase: new URL('https://app.9tofit.nl'),
   icons: {
-    icon: '/icon.svg',
-    apple: '/icon.svg',
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/icon-192.png', type: 'image/png', sizes: '192x192' },
+    ],
+    apple: [
+      { url: '/icon-192.png', sizes: '192x192' },
+      { url: '/icon-512.png', sizes: '512x512' },
+    ],
   },
 };
 

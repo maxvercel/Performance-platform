@@ -242,7 +242,8 @@ export default function MessagesPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="bg-zinc-900 border-t border-zinc-800 px-4 py-3 flex-shrink-0 mb-16">
+      <div className="bg-zinc-900 border-t border-zinc-800 px-4 py-3 flex-shrink-0"
+        style={{ marginBottom: 'calc(64px + env(safe-area-inset-bottom, 0px))' }}>
         {sendError && (
           <div className="mb-2 px-3 py-2 bg-red-500/15 border border-red-500/30 rounded-xl">
             <p className="text-red-400 text-xs">{sendError}</p>

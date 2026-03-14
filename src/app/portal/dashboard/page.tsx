@@ -307,46 +307,22 @@ export default function DashboardPage() {
           </button>
         )}
 
-        {/* Inline today's habits */}
+        {/* Habits — single clickable card (same style as program/workout cards) */}
         {todayHabitsList.length > 0 && (
-          <Card className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <p className="text-white font-bold text-sm">Vandaag's gewoontes</p>
-                {dailyHabitStreak >= 3 && (
-                  <span className="text-base">🔥</span>
-                )}
-              </div>
-              <button onClick={() => router.push('/portal/habits')} className="text-orange-500 text-xs font-bold hover:text-orange-400">
-                Alle habits →
-              </button>
+          <Card interactive onClick={() => router.push('/portal/habits')} className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0 ${
+              habitPercent === 100 ? 'bg-green-500/20' : 'bg-orange-500/20'
+            }`}>
+              {habitPercent === 100 ? '✅' : '🎯'}
             </div>
-            {dailyHabitStreak > 0 && (
-              <p className="text-zinc-500 text-xs mb-2">
-                {dailyHabitStreak} dag{dailyHabitStreak !== 1 ? 'en' : ''} op rij 100% voltooid
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-bold text-sm">Habits</p>
+              <p className="text-zinc-500 text-xs mt-0.5">
+                {todayHabits.completed}/{todayHabits.total} voltooid
+                {dailyHabitStreak >= 3 && ` · 🔥 ${dailyHabitStreak} dagen op rij`}
               </p>
-            )}
-            <div className="space-y-0.5">
-              {todayHabitsList.map(habit => (
-                <button
-                  key={habit.id}
-                  onClick={() => toggleHabit(habit.id, habit.completed)}
-                  className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-zinc-800/50 transition active:bg-zinc-700"
-                >
-                  <input
-                    type="checkbox"
-                    checked={habit.completed}
-                    onChange={() => {}}
-                    className="w-3.5 h-3.5 rounded accent-orange-500 cursor-pointer flex-shrink-0"
-                    onClick={e => e.stopPropagation()}
-                  />
-                  <span className="text-sm flex-shrink-0">{habit.icon ?? '⭐'}</span>
-                  <span className={`text-left text-xs ${habit.completed ? 'text-zinc-500 line-through' : 'text-white'}`}>
-                    {habit.name}
-                  </span>
-                </button>
-              ))}
             </div>
+            <span className="text-orange-500 text-sm font-bold flex-shrink-0">Bekijk →</span>
           </Card>
         )}
 

@@ -96,6 +96,7 @@ export default function ReadinessCheckin({ userId, onScoreUpdate }: ReadinessChe
   const [saved, setSaved] = useState(false)
   const [existingId, setExistingId] = useState<string | null>(null)
   const [notes, setNotes] = useState('')
+  const [error, setError] = useState<string | null>(null)
 
   // Load existing check-in for today
   useEffect(() => {
@@ -152,15 +153,26 @@ export default function ReadinessCheckin({ userId, onScoreUpdate }: ReadinessChe
       readiness_score: score,
     }
 
+    let saveError = null
     if (existingId) {
-      await supabase.from('daily_readiness').update(payload).eq('id', existingId)
+      const { error: updateErr } = await supabase.from('daily_readiness').update(payload).eq('id', existingId)
+      saveError = updateErr
     } else {
-      const { data } = await supabase.from('daily_readiness').insert(payload).select('id').single()
+      const { data, error: insertErr } = await supabase.from('daily_readiness').insert(payload).select('id').single()
+      saveError = insertErr
       if (data) setExistingId(data.id)
     }
 
-    setSaved(true)
     setSaving(false)
+
+    if (saveError) {
+      console.error('Readiness save error:', saveError)
+      setError('Opslaan mislukt, probeer opnieuw')
+      setTimeout(() => setError(null), 3000)
+      return
+    }
+
+    setSaved(true)
     setExpanded(false) // Auto-collapse after save
     onScoreUpdate?.(score)
   }
@@ -335,6 +347,9 @@ export default function ReadinessCheckin({ userId, onScoreUpdate }: ReadinessChe
         >
           {saving ? 'Opslaan...' : saved ? '✓ Opgeslagen' : `Opslaan (${filledCount}/5)`}
         </button>
+        {error && (
+          <p className="text-red-400 text-xs mt-2 text-center">{error}</p>
+        )}
       </div>
     </div>
   )
