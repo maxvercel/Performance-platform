@@ -1,25 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+import { createClient } from '@/lib/supabase/server'
 
 // GET — fetch features for a client (coach or client themselves)
 export async function GET(request: NextRequest) {
+  const supabase = await createClient()
   const clientId = request.nextUrl.searchParams.get('client_id')
   if (!clientId) {
     return NextResponse.json({ error: 'client_id vereist' }, { status: 400 })
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from('client_features')
     .select('feature, enabled')
     .eq('client_id', clientId)
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    // Table might not exist yet — return empty features instead of error
+    return NextResponse.json({ features: {} })
   }
 
   // Return as a map: { nutrition: true, ... }
@@ -33,6 +30,12 @@ export async function GET(request: NextRequest) {
 
 // POST — toggle a feature for a client (coach only)
 export async function POST(request: NextRequest) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const body = await request.json()
   const { client_id, feature, enabled } = body
 
@@ -41,7 +44,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Upsert the feature toggle
-  const { error } = await supabaseAdmin
+  const { error } = await supabase
     .from('client_features')
     .upsert(
       { client_id, feature, enabled },

@@ -37,19 +37,55 @@ CREATE POLICY "Coaches can read client features"
     )
   );
 
--- Service role can insert/update (via API route)
-CREATE POLICY "Service can manage features"
-  ON client_features FOR ALL
-  USING (true)
-  WITH CHECK (true);
+-- Coaches can insert features for their clients
+CREATE POLICY "Coaches can insert client features"
+  ON client_features FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM coach_client
+      WHERE coach_client.coach_id = auth.uid()
+      AND coach_client.client_id = client_features.client_id
+      AND coach_client.active = true
+    )
+  );
 
--- Also: allow admin to update any profile role
--- (needed for the role-change feature in admin panel)
-CREATE POLICY "Admin can update profiles"
-  ON profiles FOR UPDATE
+-- Coaches can update features for their clients
+CREATE POLICY "Coaches can update client features"
+  ON client_features FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM coach_client
+      WHERE coach_client.coach_id = auth.uid()
+      AND coach_client.client_id = client_features.client_id
+      AND coach_client.active = true
+    )
+  );
+
+-- Admins can do everything with features
+CREATE POLICY "Admins can manage all features"
+  ON client_features FOR ALL
   USING (
     EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
   )
   WITH CHECK (
     EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
   );
+
+-- Allow admin to update any profile role
+-- (needed for the role-change feature in admin panel)
+-- NOTE: Check if this policy already exists before running
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE policyname = 'Admin can update profiles' AND tablename = 'profiles'
+  ) THEN
+    CREATE POLICY "Admin can update profiles"
+      ON profiles FOR UPDATE
+      USING (
+        EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+      )
+      WITH CHECK (
+        EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+      );
+  END IF;
+END $$;
