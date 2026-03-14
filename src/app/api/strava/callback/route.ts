@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url)
-  const code = searchParams.get('code')
-  const error = searchParams.get('error')
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  const url = new URL(request.url)
+  const appUrl = `${url.protocol}//${url.host}`
+  const code = url.searchParams.get('code')
+  const error = url.searchParams.get('error')
 
   if (error || !code) {
     return NextResponse.redirect(`${appUrl}/portal/progress?strava=error`)

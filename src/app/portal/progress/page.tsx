@@ -691,27 +691,39 @@ export default function ProgressPage() {
             </div>
           </div>
 
-          {/* OnForm Video Analyse */}
-          <a
-            href="https://www.onform.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block bg-zinc-900 border border-zinc-800 rounded-2xl p-4 hover:border-purple-500/40 transition-all group"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-purple-600 rounded-xl flex items-center justify-center">
-                <span className="text-white font-black text-sm">OF</span>
+          {/* OnForm Video Analyse — alleen op mobiel */}
+          <div className="block sm:hidden">
+            <button
+              onClick={() => {
+                // Try deep link to OnForm app first, fallback to app store
+                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+                const isAndroid = /Android/.test(navigator.userAgent)
+                if (isIOS) {
+                  window.location.href = 'onform://'
+                  setTimeout(() => {
+                    window.location.href = 'https://apps.apple.com/app/onform-video-analysis/id1490334045'
+                  }, 1500)
+                } else if (isAndroid) {
+                  window.location.href = 'https://play.google.com/store/apps/details?id=com.onform.app'
+                }
+              }}
+              className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-2xl p-4 hover:border-purple-500/40 transition-all group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-purple-600 rounded-xl flex items-center justify-center">
+                  <span className="text-white text-lg">🎥</span>
+                </div>
+                <div className="flex-1">
+                  <p className="text-white font-bold text-sm">Voeg video analyse toe</p>
+                  <p className="text-zinc-500 text-xs">Open OnForm voor techniekanalyse</p>
+                </div>
+                <span className="text-zinc-600 group-hover:text-purple-400 transition text-lg">→</span>
               </div>
-              <div className="flex-1">
-                <p className="text-white font-bold text-sm">OnForm Video Analyse</p>
-                <p className="text-zinc-500 text-xs">Analyseer je techniek met video feedback</p>
-              </div>
-              <span className="text-zinc-600 group-hover:text-purple-400 transition text-lg">→</span>
-            </div>
-            <p className="text-zinc-400 text-xs mt-3">
-              Gebruik OnForm om je oefeningen op te nemen en je bewegingstechniek te verbeteren met professionele video-analyse.
-            </p>
-          </a>
+              <p className="text-zinc-400 text-xs mt-3">
+                Neem je oefeningen op en verbeter je bewegingstechniek met professionele video-analyse via OnForm.
+              </p>
+            </button>
+          </div>
 
           {runChartData.length > 1 && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">

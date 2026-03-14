@@ -5,14 +5,12 @@
       <stop offset="50%" stop-color="#ff8c42"/>
       <stop offset="100%" stop-color="#f37321"/>
     </linearGradient>
-    <mask id="m">
-      <circle cx="256" cy="256" r="225" fill="white"/>
-      <rect x="220" y="122" width="72" height="268" rx="20" fill="black"/>
-      <rect x="122" y="220" width="268" height="72" rx="20" fill="black"/>
-    </mask>
   </defs>
   <!-- Dark rounded background -->
   <rect width="512" height="512" rx="96" fill="#09090b"/>
-  <!-- Orange circle with + cutout -->
-  <circle cx="256" cy="256" r="225" fill="url(#g)" mask="url(#m)"/>
+  <!-- Orange circle -->
+  <circle cx="256" cy="256" r="225" fill="url(#g)"/>
+  <!-- + cutout using dark background color -->
+  <rect x="220" y="122" width="72" height="268" rx="20" fill="#09090b"/>
+  <rect x="122" y="220" width="268" height="72" rx="20" fill="#09090b"/>
 </svg>
