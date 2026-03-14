@@ -1,9 +1,35 @@
 'use client'
 import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
 export default function BevestigdPage() {
   const router = useRouter()
+
+  // Record referral signup if a ref code was stored during registration
+  useEffect(() => {
+    async function trackReferral() {
+      const refCode = sessionStorage.getItem('9tofit_ref')
+      if (!refCode) return
+
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      try {
+        await fetch('/api/referral', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: refCode, newUserId: user.id }),
+        })
+        // Clean up so we don't track twice
+        sessionStorage.removeItem('9tofit_ref')
+      } catch (err) {
+        console.error('Referral tracking error:', err)
+      }
+    }
+    trackReferral()
+  }, [])
 
   return (
     <div className="min-h-screen bg-black flex items-center justify-center p-4">

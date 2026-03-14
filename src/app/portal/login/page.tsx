@@ -1,12 +1,23 @@
 'use client'
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { validateRegistration } from '@/lib/validation'
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+
+  // Capture referral code from URL (?ref=ABC123)
+  const refCode = searchParams.get('ref')
+
+  // Store referral code in sessionStorage so it persists through the signup flow
+  useEffect(() => {
+    if (refCode) {
+      sessionStorage.setItem('9tofit_ref', refCode)
+    }
+  }, [refCode])
 
   const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login')
   const [loading, setLoading] = useState(false)

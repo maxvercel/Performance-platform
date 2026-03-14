@@ -26,6 +26,7 @@ export default function ProfilePage() {
   const [nameError, setNameError] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [inviteCount, setInviteCount] = useState(0)
+  const [referralCode, setReferralCode] = useState<string | null>(null)
   const [inviteCopied, setInviteCopied] = useState(false)
   const [shareCopied, setShareCopied] = useState(false)
 
@@ -36,11 +37,17 @@ export default function ProfilePage() {
     }
   }, [profile?.full_name])
 
-  // Load invite count from localStorage
+  // Load referral code and real signup count from API
   useEffect(() => {
-    const count = parseInt(localStorage.getItem('9tofit_invite_count') ?? '0', 10)
-    setInviteCount(count)
-  }, [])
+    if (!profile?.id) return
+    fetch('/api/referral')
+      .then(res => res.json())
+      .then(data => {
+        setReferralCode(data.code ?? null)
+        setInviteCount(data.signupCount ?? 0)
+      })
+      .catch(err => console.error('Referral load error:', err))
+  }, [profile?.id])
 
   async function saveProfile() {
     if (!profile) return
@@ -86,11 +93,15 @@ export default function ProfilePage() {
   }
 
   function handleInvite() {
-    const inviteText = `Ik train met 9toFit Performance Coaching! Probeer het zelf: https://app.9tofit.nl`
-    navigator.clipboard.writeText(inviteText)
-    const newCount = inviteCount + 1
-    setInviteCount(newCount)
-    localStorage.setItem('9tofit_invite_count', String(newCount))
+    const refParam = referralCode ? `?ref=${referralCode}` : ''
+    const inviteUrl = `https://app.9tofit.nl/portal/login${refParam}`
+    const inviteText = `Ik train met 9toFit Performance Coaching! Probeer het zelf: ${inviteUrl}`
+
+    if (navigator.share) {
+      navigator.share({ title: '9toFit', text: inviteText, url: inviteUrl }).catch(() => {})
+    } else {
+      navigator.clipboard.writeText(inviteText)
+    }
     setInviteCopied(true)
     setTimeout(() => setInviteCopied(false), 2000)
   }
@@ -107,15 +118,16 @@ export default function ProfilePage() {
     const topPR = records?.[0]
     const exerciseName = (topPR?.exercises as any)?.name ?? 'een oefening'
     const weight = topPR?.weight_kg ?? 0
+    const firstName = profile?.full_name?.split(' ')[0] ?? ''
 
     const shareText = weight > 0
-      ? `Nieuw PR! ${weight} kg op ${exerciseName} 💪🔥 — 9toFit Performance Coaching`
-      : `Ik train met 9toFit Performance Coaching! 💪 https://app.9tofit.nl`
+      ? `${firstName} heeft een nieuw PR gezet! 🏆\n\n${weight} kg op ${exerciseName} 💪🔥\n\nTrain jij ook mee? app.9tofit.nl`
+      : `${firstName} traint met 9toFit Performance Coaching! 💪\n\nTrain jij ook mee? app.9tofit.nl`
 
     if (navigator.share) {
       try {
-        await navigator.share({ title: '9toFit PR', text: shareText, url: 'https://app.9tofit.nl' })
-      } catch { /* user cancelled */ }
+        await navigator.share({ title: '9toFit — Nieuw PR!', text: shareText })
+      } catch { /* user cancelled share */ }
     } else {
       navigator.clipboard.writeText(shareText)
       setShareCopied(true)
@@ -287,7 +299,7 @@ export default function ProfilePage() {
             className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold
                        py-2.5 rounded-xl text-sm transition active:scale-95"
           >
-            {inviteCopied ? '✓ Link gekopieerd!' : '🔗 Kopieer uitnodigingslink'}
+            {inviteCopied ? '✓ Verstuurd!' : '🔗 Deel uitnodigingslink'}
           </button>
         </Card>
 
