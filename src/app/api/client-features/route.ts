@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { rateLimit } from '@/lib/rateLimit'
 
 // GET — fetch features for a client (coach or client themselves)
 export async function GET(request: NextRequest) {
+  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
+  if (!rateLimit(ip + ':features-get', 60)) {
+    return NextResponse.json({ error: 'Te veel verzoeken' }, { status: 429 })
+  }
   const supabase = await createClient()
   const clientId = request.nextUrl.searchParams.get('client_id')
   if (!clientId) {
@@ -30,6 +35,10 @@ export async function GET(request: NextRequest) {
 
 // POST — toggle a feature for a client (coach only)
 export async function POST(request: NextRequest) {
+  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
+  if (!rateLimit(ip + ':features-post', 20)) {
+    return NextResponse.json({ error: 'Te veel verzoeken' }, { status: 429 })
+  }
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {

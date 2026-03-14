@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Button } from './Button'
 import { Card } from './Card'
+import { useToast } from './Toast'
 
 type NotificationPermission = 'default' | 'granted' | 'denied'
 
@@ -11,6 +12,7 @@ interface NotificationSettingsProps {
 }
 
 export const NotificationSettings: React.FC<NotificationSettingsProps> = ({ onStatusChange }) => {
+  const { toast } = useToast()
   const [permission, setPermission] = useState<NotificationPermission>('default')
   const [loading, setLoading] = useState(false)
   const [isSupported, setIsSupported] = useState(false)
@@ -51,7 +53,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({ onSt
 
   const handleEnableNotifications = async () => {
     if (!isSupported) {
-      alert('Je browser ondersteunt meldingen niet')
+      toast('Je browser ondersteunt meldingen niet', 'error')
       return
     }
 
@@ -73,7 +75,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({ onSt
           const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
           if (!publicKey) {
             console.error('VAPID public key not found. Please set NEXT_PUBLIC_VAPID_PUBLIC_KEY environment variable.')
-            alert('Pushberichten kunnen niet ingeschakeld worden. VAPID-sleutel ontbreekt.')
+            toast('Pushberichten kunnen niet ingeschakeld worden. VAPID-sleutel ontbreekt.', 'error')
             setLoading(false)
             return
           }
@@ -101,7 +103,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({ onSt
             onStatusChange?.(true)
           } catch (error) {
             console.error('Failed to subscribe to push notifications:', error)
-            alert('Pushberichten konden niet ingeschakeld worden. Probeer het later opnieuw.')
+            toast('Pushberichten konden niet ingeschakeld worden. Probeer het later opnieuw.', 'error')
             setPermission('default')
           }
         }

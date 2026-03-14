@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { rateLimit } from '@/lib/rateLimit'
 
 interface OpenFoodFactsProduct {
   product_name?: string
@@ -27,6 +28,11 @@ interface SimplifiedProduct {
 }
 
 export async function GET(request: NextRequest) {
+  const ip = request.headers.get('x-forwarded-for') ?? 'unknown'
+  if (!rateLimit(ip + ':nutrition-search', 30)) {
+    return NextResponse.json({ error: 'Te veel verzoeken' }, { status: 429 })
+  }
+
   try {
     const searchParams = request.nextUrl.searchParams
     const q = searchParams.get('q')

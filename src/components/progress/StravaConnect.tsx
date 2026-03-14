@@ -38,64 +38,78 @@ const ACTIVITY_ICONS: Record<string, string> = {
 
 export default function StravaConnect({ onImportActivity }: StravaConnectProps) {
   const [connected, setConnected] = useState(false)
-  const [accessToken, setAccessToken] = useState<string | null>(null)
   const [activities, setActivities] = useState<StravaActivity[]>([])
   const [loading, setLoading] = useState(false)
-  const [athleteName, setAthleteName] = useState<string>('')
+  const [error, setError] = useState<string | null>(null)
 
-  // Check URL params for Strava callback
+  // Check URL params for Strava callback result
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const stravaStatus = params.get('strava')
 
     if (stravaStatus === 'connected') {
-      const token = params.get('access_token')
-      const athleteId = params.get('athlete_id')
-      if (token) {
-        setAccessToken(token)
-        setConnected(true)
-        localStorage.setItem('strava_token', token)
-        fetchActivities(token)
+      setConnected(true)
+      fetchActivities()
 
-        // Clean URL
-        const url = new URL(window.location.href)
-        url.search = ''
-        window.history.replaceState({}, '', url.toString())
-      }
+      // Clean URL
+      const url = new URL(window.location.href)
+      url.searchParams.delete('strava')
+      window.history.replaceState({}, '', url.toString())
+    } else if (stravaStatus === 'error') {
+      setError('Verbinding met Strava mislukt. Probeer opnieuw.')
+      const url = new URL(window.location.href)
+      url.searchParams.delete('strava')
+      window.history.replaceState({}, '', url.toString())
     } else {
-      // Check if we have a saved token
-      const saved = localStorage.getItem('strava_token')
-      if (saved) {
-        setAccessToken(saved)
-        setConnected(true)
-        fetchActivities(saved)
-      }
+      // Try fetching activities — if cookie exists, we're connected
+      checkConnection()
     }
+
+    // Clean up old localStorage token (migration)
+    localStorage.removeItem('strava_token')
   }, [])
 
-  async function fetchActivities(token: string) {
-    setLoading(true)
+  async function checkConnection() {
     try {
-      const res = await fetch(`/api/strava/activities?access_token=${token}`)
+      const res = await fetch('/api/strava/activities')
       if (res.ok) {
         const data = await res.json()
         setActivities(data)
-      } else {
-        // Token might be expired
-        setConnected(false)
-        localStorage.removeItem('strava_token')
+        setConnected(true)
       }
-    } catch (err) {
-      console.error('Failed to fetch Strava activities:', err)
+    } catch {
+      // Silently fail — user is just not connected
+    }
+  }
+
+  async function fetchActivities() {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/strava/activities')
+      if (res.ok) {
+        const data = await res.json()
+        setActivities(data)
+      } else if (res.status === 401) {
+        setConnected(false)
+        setError('Strava sessie verlopen. Verbind opnieuw.')
+      } else {
+        setError('Kon activiteiten niet laden.')
+      }
+    } catch {
+      setError('Netwerkfout bij laden van activiteiten.')
     }
     setLoading(false)
   }
 
-  function disconnect() {
+  async function disconnect() {
+    try {
+      await fetch('/api/strava/disconnect', { method: 'POST' })
+    } catch {
+      // Best effort
+    }
     setConnected(false)
-    setAccessToken(null)
     setActivities([])
-    localStorage.removeItem('strava_token')
   }
 
   function formatDuration(seconds: number): string {
@@ -123,6 +137,9 @@ export default function StravaConnect({ onImportActivity }: StravaConnectProps) 
         <p className="text-zinc-400 text-xs mb-3">
           Synchroniseer je runs, fietstochten en andere activiteiten automatisch vanuit Strava.
         </p>
+        {error && (
+          <p className="text-red-400 text-xs mb-3">{error}</p>
+        )}
         <a
           href="/api/strava/connect"
           className="block w-full text-center bg-[#FC4C02] hover:bg-[#e0440a] text-white font-bold py-3 rounded-xl transition text-sm"
@@ -135,7 +152,6 @@ export default function StravaConnect({ onImportActivity }: StravaConnectProps) 
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
-      {/* Header */}
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 bg-[#FC4C02] rounded-lg flex items-center justify-center">
@@ -154,7 +170,6 @@ export default function StravaConnect({ onImportActivity }: StravaConnectProps) 
         </button>
       </div>
 
-      {/* Stats summary */}
       {activities.length > 0 && (
         <div className="grid grid-cols-3 gap-0 border-b border-zinc-800">
           <div className="p-3 text-center border-r border-zinc-800">
@@ -176,7 +191,12 @@ export default function StravaConnect({ onImportActivity }: StravaConnectProps) 
         </div>
       )}
 
-      {/* Activities list */}
+      {error && (
+        <div className="px-4 py-3 bg-red-500/10 border-b border-red-500/20">
+          <p className="text-red-400 text-xs">{error}</p>
+        </div>
+      )}
+
       {loading ? (
         <div className="p-8 text-center">
           <div className="w-6 h-6 border-2 border-[#FC4C02] border-t-transparent rounded-full animate-spin mx-auto mb-2" />
@@ -205,21 +225,19 @@ export default function StravaConnect({ onImportActivity }: StravaConnectProps) 
                     {format(parseISO(activity.start_date), 'EEEE d MMMM, HH:mm', { locale: nl })}
                   </p>
                   <div className="flex gap-3 mt-1 flex-wrap">
-                    {activity.distance_km && (
+                    {activity.distance_km != null && activity.distance_km > 0 && (
                       <span className="text-zinc-400 text-xs">{activity.distance_km} km</span>
                     )}
-                    {activity.duration_seconds && (
-                      <span className="text-zinc-400 text-xs">
-                        ⏱ {formatDuration(activity.duration_seconds)}
-                      </span>
+                    {activity.duration_seconds != null && (
+                      <span className="text-zinc-400 text-xs">⏱ {formatDuration(activity.duration_seconds)}</span>
                     )}
-                    {activity.avg_heart_rate && (
+                    {activity.avg_heart_rate != null && (
                       <span className="text-zinc-400 text-xs">❤️ {Math.round(activity.avg_heart_rate)} bpm</span>
                     )}
-                    {activity.calories && (
+                    {activity.calories != null && activity.calories > 0 && (
                       <span className="text-zinc-400 text-xs">🔥 {activity.calories} kcal</span>
                     )}
-                    {activity.elevation_gain && (
+                    {activity.elevation_gain != null && activity.elevation_gain > 0 && (
                       <span className="text-zinc-400 text-xs">⛰️ {Math.round(activity.elevation_gain)}m</span>
                     )}
                   </div>

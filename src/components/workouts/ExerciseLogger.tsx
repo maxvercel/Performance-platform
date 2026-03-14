@@ -1,9 +1,9 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRestTimer } from '@/hooks/useRestTimer'
 
-type Set = {
+type ExerciseSet = {
   setNumber: number
   weight: string
   reps: string
@@ -12,33 +12,91 @@ type Set = {
   notes?: string
 }
 
-type Props = {
-  programExercise: any
-  workoutLogId: string
+type ProgramExercise = {
+  id: string
+  exercise_id: string
+  order_index: number
+  sets: number
+  reps: string | number
+  weight_kg?: number
+  rest_seconds?: number
+  notes?: string
+  exercises?: {
+    name: string
+    description?: string
+    illustration_url?: string
+  }
 }
 
-export default function ExerciseLogger({ programExercise, workoutLogId }: Props) {
+type Props = {
+  programExercise: ProgramExercise
+  workoutLogId: string
+  /** Show warmup toggle and per-set notes (default: true) */
+  showWarmupAndNotes?: boolean
+  /** Show AI illustration banner (default: false) */
+  showIllustration?: boolean
+}
+
+export default function ExerciseLogger({
+  programExercise,
+  workoutLogId,
+  showWarmupAndNotes = true,
+  showIllustration = false,
+}: Props) {
   const supabase = createClient()
   const targetSets = programExercise.sets ?? 3
 
-  const [sets, setSets] = useState<Set[]>(
+  const [sets, setSets] = useState<ExerciseSet[]>(
     Array.from({ length: targetSets }, (_, i) => ({
       setNumber: i + 1,
       weight: programExercise.weight_kg?.toString() ?? '',
       reps: '',
-      done: false
+      done: false,
     }))
   )
   const [expanded, setExpanded] = useState(true)
   const [expandedNotes, setExpandedNotes] = useState(new Set<number>())
+  const [illustrationUrl, setIllustrationUrl] = useState<string | null>(
+    programExercise.exercises?.illustration_url ?? null
+  )
+  const [loadingIllustration, setLoadingIllustration] = useState(false)
   const restSeconds = programExercise.rest_seconds ?? 90
   const { timeRemaining, isActive: restActive, start: startRest, skip: skipRest } = useRestTimer()
+
+  // Generate illustration on mount if enabled and not already present
+  useEffect(() => {
+    if (showIllustration && !illustrationUrl) {
+      generateIllustration()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function generateIllustration() {
+    if (loadingIllustration) return
+    setLoadingIllustration(true)
+    try {
+      const res = await fetch('/api/exercise-illustration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          exerciseId: programExercise.exercise_id,
+          exerciseName: programExercise.exercises?.name ?? '',
+        }),
+      })
+      const data = await res.json()
+      if (data.url) setIllustrationUrl(data.url)
+    } catch (e) {
+      console.error('Illustratie fout:', e)
+    }
+    setLoadingIllustration(false)
+  }
 
   async function completeSet(index: number) {
     const s = sets[index]
     if (!s.reps) return
 
-    const notesValue = s.notes ? `${s.is_warmup ? 'WARMUP:' : ''}${s.notes}` : (s.is_warmup ? 'WARMUP:' : null)
+    const notesValue = showWarmupAndNotes && s.notes
+      ? `${s.is_warmup ? 'WARMUP:' : ''}${s.notes}`
+      : (showWarmupAndNotes && s.is_warmup ? 'WARMUP:' : null)
 
     const { error } = await supabase.from('exercise_logs').insert({
       workout_log_id: workoutLogId,
@@ -68,7 +126,7 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
       setNumber: prev.length + 1,
       weight: sets[0]?.weight ?? '',
       reps: '',
-      done: false
+      done: false,
     }])
   }
 
@@ -76,6 +134,10 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
   const completedSets = sets.filter(s => s.done && !s.is_warmup).length
   const allDone = completedSets === workingSets.length
   const progressPct = (completedSets / (workingSets.length || 1)) * 100
+
+  const gridCols = showWarmupAndNotes
+    ? 'grid-cols-[50px_1fr_1fr_50px_44px]'
+    : 'grid-cols-[32px_1fr_1fr_44px]'
 
   return (
     <div className={`rounded-2xl overflow-hidden border transition-all duration-300 ${
@@ -86,7 +148,41 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
         : 'border-zinc-800 bg-zinc-900'
     }`}>
 
-      {/* Rusttimer */}
+      {/* Illustration banner (optional) */}
+      {showIllustration && expanded && (
+        <div className="relative w-full bg-zinc-800 overflow-hidden" style={{ height: '180px' }}>
+          {loadingIllustration ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+              <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+              <p className="text-zinc-500 text-xs">Illustratie genereren...</p>
+            </div>
+          ) : illustrationUrl ? (
+            <>
+              <img
+                src={illustrationUrl}
+                alt={programExercise.exercises?.name}
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-transparent to-transparent" />
+            </>
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-6xl opacity-20">💪</span>
+            </div>
+          )}
+          <div className="absolute bottom-0 left-0 right-0 px-4 pb-3">
+            <p className="text-white font-black text-lg drop-shadow-lg">
+              {programExercise.exercises?.name}
+            </p>
+            <p className="text-zinc-400 text-xs">
+              {programExercise.sets} sets · {programExercise.reps} reps
+              {programExercise.rest_seconds ? ` · ${programExercise.rest_seconds}s rust` : ''}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Rest timer */}
       {restActive && timeRemaining !== null && (
         <div className="bg-zinc-800 border-b border-orange-500/30 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -133,10 +229,13 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
             <span className="text-zinc-600 text-xs flex-shrink-0">{completedSets}/{workingSets.length}</span>
           </div>
         </div>
-        <span className="text-zinc-600 text-xs">{expanded ? '▲' : '▼'}</span>
+        <span className="text-zinc-600 text-xs transition-transform duration-200"
+          style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+          ▼
+        </span>
       </div>
 
-      {/* Uitklapbare inhoud */}
+      {/* Expandable content */}
       {expanded && (
         <div className="px-4 pb-4 space-y-3 border-t border-zinc-800 pt-3">
 
@@ -154,35 +253,43 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
             </div>
           )}
 
-          <div className="grid grid-cols-[50px_1fr_1fr_50px_44px] gap-2 px-1">
+          {/* Column headers */}
+          <div className={`grid ${gridCols} gap-2 px-1`}>
             <span className="text-zinc-600 text-xs text-center">SET</span>
             <span className="text-zinc-600 text-xs text-center">KG</span>
             <span className="text-zinc-600 text-xs text-center">REPS</span>
-            <span />
+            {showWarmupAndNotes && <span />}
             <span />
           </div>
 
+          {/* Sets */}
           {sets.map((s, i) => {
             const notesExpanded = expandedNotes.has(i)
             return (
               <div key={i} className="space-y-1">
-                <div className={`grid grid-cols-[50px_1fr_1fr_50px_44px] gap-2 items-center ${
+                <div className={`grid ${gridCols} gap-2 items-center ${
                   s.done ? 'opacity-40' : ''
                 }`}>
-                  <button
-                    onClick={() => setSets(prev => prev.map((set, idx) =>
-                      idx === i ? { ...set, is_warmup: !set.is_warmup } : set
-                    ))}
-                    disabled={s.done}
-                    className={`text-xs font-bold px-2 py-1.5 rounded-lg transition text-center ${
-                      s.is_warmup
-                        ? 'bg-blue-500/20 text-blue-400'
-                        : 'bg-zinc-700 text-zinc-500 hover:bg-zinc-600'
-                    } disabled:opacity-40`}
-                    title={s.is_warmup ? 'Verwijder warm-up' : 'Markeer als warm-up'}
-                  >
-                    {s.is_warmup ? 'W' : `S${s.setNumber}`}
-                  </button>
+                  {showWarmupAndNotes ? (
+                    <button
+                      onClick={() => setSets(prev => prev.map((set, idx) =>
+                        idx === i ? { ...set, is_warmup: !set.is_warmup } : set
+                      ))}
+                      disabled={s.done}
+                      className={`text-xs font-bold px-2 py-1.5 rounded-lg transition text-center ${
+                        s.is_warmup
+                          ? 'bg-blue-500/20 text-blue-400'
+                          : 'bg-zinc-700 text-zinc-500 hover:bg-zinc-600'
+                      } disabled:opacity-40`}
+                      title={s.is_warmup ? 'Verwijder warm-up' : 'Markeer als warm-up'}
+                    >
+                      {s.is_warmup ? 'W' : `S${s.setNumber}`}
+                    </button>
+                  ) : (
+                    <span className="text-zinc-500 text-sm text-center font-mono font-bold">
+                      {s.setNumber}
+                    </span>
+                  )}
                   <input
                     type="number"
                     step="0.5"
@@ -208,26 +315,25 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
                                text-white text-sm text-center focus:outline-none
                                focus:border-orange-500 disabled:opacity-40 transition"
                   />
-                  <button
-                    onClick={() => {
-                      const newSet = new Set(expandedNotes)
-                      if (newSet.has(i)) {
-                        newSet.delete(i)
-                      } else {
-                        newSet.add(i)
-                      }
-                      setExpandedNotes(newSet)
-                    }}
-                    disabled={s.done}
-                    className={`w-10 h-10 rounded-lg flex items-center justify-center transition text-sm ${
-                      notesExpanded || s.notes
-                        ? 'bg-blue-500/20 text-blue-400'
-                        : 'bg-zinc-700 text-zinc-600 hover:bg-zinc-600'
-                    } disabled:opacity-40`}
-                    title="Voeg notities toe"
-                  >
-                    💬
-                  </button>
+                  {showWarmupAndNotes && (
+                    <button
+                      onClick={() => {
+                        const newSet = new Set(expandedNotes)
+                        if (newSet.has(i)) newSet.delete(i)
+                        else newSet.add(i)
+                        setExpandedNotes(newSet)
+                      }}
+                      disabled={s.done}
+                      className={`w-10 h-10 rounded-lg flex items-center justify-center transition text-sm ${
+                        notesExpanded || s.notes
+                          ? 'bg-blue-500/20 text-blue-400'
+                          : 'bg-zinc-700 text-zinc-600 hover:bg-zinc-600'
+                      } disabled:opacity-40`}
+                      title="Voeg notities toe"
+                    >
+                      💬
+                    </button>
+                  )}
                   <button
                     onClick={() => completeSet(i)}
                     disabled={s.done || !s.reps}
@@ -241,8 +347,8 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
                   </button>
                 </div>
 
-                {/* Notes input — shown when expanded */}
-                {notesExpanded && !s.done && (
+                {/* Notes input */}
+                {showWarmupAndNotes && notesExpanded && !s.done && (
                   <div className="bg-blue-500/5 border border-blue-500/10 rounded-lg px-3 py-2 ml-2">
                     <input
                       type="text"

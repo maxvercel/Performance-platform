@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
   const error = searchParams.get('error')
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
   if (error || !code) {
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/portal/progress?strava=error`
-    )
+    return NextResponse.redirect(`${appUrl}/portal/progress?strava=error`)
   }
 
   try {
@@ -28,32 +26,34 @@ export async function GET(request: NextRequest) {
     const tokenData = await tokenRes.json()
 
     if (!tokenData.access_token) {
-      return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL}/portal/progress?strava=error`
-      )
+      return NextResponse.redirect(`${appUrl}/portal/progress?strava=error`)
     }
 
-    // Get the athlete info
-    const athleteId = tokenData.athlete?.id
+    // Redirect with success param — store token in httpOnly cookie
+    const response = NextResponse.redirect(`${appUrl}/portal/progress?strava=connected`)
 
-    // Store tokens in Supabase
-    // Note: we need the user's auth session to link it
-    // For now, redirect with the token info to be stored client-side
-    const params = new URLSearchParams({
-      strava: 'connected',
-      athlete_id: String(athleteId ?? ''),
-      access_token: tokenData.access_token,
-      refresh_token: tokenData.refresh_token,
-      expires_at: String(tokenData.expires_at),
+    // Set httpOnly cookie — not accessible from JS, much safer than localStorage
+    response.cookies.set('strava_access_token', tokenData.access_token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: tokenData.expires_in || 21600, // Default 6 hours
     })
 
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/portal/progress?${params.toString()}`
-    )
+    if (tokenData.refresh_token) {
+      response.cookies.set('strava_refresh_token', tokenData.refresh_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60 * 24 * 30, // 30 days
+      })
+    }
+
+    return response
   } catch (err) {
     console.error('Strava callback error:', err)
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/portal/progress?strava=error`
-    )
+    return NextResponse.redirect(`${appUrl}/portal/progress?strava=error`)
   }
 }

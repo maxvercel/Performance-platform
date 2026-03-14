@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/useAuth'
 import { PageSpinner } from '@/components/ui/Spinner'
 import { useRouter } from 'next/navigation'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 
 interface CoachOverview {
   id: string
@@ -39,6 +40,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'overview' | 'coaches' | 'clients'>('overview')
   const [changingRole, setChangingRole] = useState<string | null>(null)
+  const [roleConfirm, setRoleConfirm] = useState<{ userId: string; name: string; newRole: 'client' | 'coach' | 'admin' } | null>(null)
 
   useEffect(() => {
     if (authLoading) return
@@ -137,8 +139,8 @@ export default function AdminDashboard() {
       return {
         id: user.id,
         full_name: user.full_name,
-        email: (user as any).email ?? '',
-        role: (user as any).role ?? 'client',
+        email: user.email ?? '',
+        role: user.role ?? 'client',
         coachName: myCoach?.full_name ?? 'Geen coach',
         activeProgram: myProgram?.name ?? null,
         workoutsThisWeek: myWorkouts.filter(w => w.completed_at).length,
@@ -330,7 +332,7 @@ export default function AdminDashboard() {
                     <button
                       key={role}
                       onClick={() => {
-                        if (client.role !== role) changeRole(client.id, role)
+                        if (client.role !== role) setRoleConfirm({ userId: client.id, name: client.full_name || client.email, newRole: role })
                       }}
                       disabled={changingRole === client.id}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
@@ -352,6 +354,23 @@ export default function AdminDashboard() {
           </div>
         )}
       </div>
+
+      {/* Role change confirmation */}
+      <ConfirmDialog
+        open={!!roleConfirm}
+        title="Rol wijzigen"
+        description={roleConfirm ? `Weet je zeker dat je ${roleConfirm.name} de rol "${roleConfirm.newRole}" wilt geven?` : ''}
+        confirmText="Wijzigen"
+        cancelText="Annuleren"
+        variant={roleConfirm?.newRole === 'admin' ? 'danger' : 'default'}
+        onConfirm={() => {
+          if (roleConfirm) {
+            changeRole(roleConfirm.userId, roleConfirm.newRole)
+            setRoleConfirm(null)
+          }
+        }}
+        onCancel={() => setRoleConfirm(null)}
+      />
     </div>
   )
 }
