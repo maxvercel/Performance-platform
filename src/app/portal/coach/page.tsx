@@ -11,12 +11,10 @@ import type { Profile } from '@/types'
 
 interface WorkoutLogRow { client_id: string; logged_at: string }
 interface ProgramRow { id: string; client_id: string; name: string; start_date: string }
-interface MessageRow { sender_id: string; read_at: string | null }
 interface EnrichedClient extends Profile {
   lastWorkout: string | null
   activeProgram: ProgramRow | null
   daysLeft: number | null
-  unread: number
   sparkline: number[]
   compliance: number
 }
@@ -61,7 +59,7 @@ export default function CoachDashboard() {
       const fiveWeeksAgo = subWeeks(new Date(), 5).toISOString()
 
       // Use selectInChunks for safe .in() with many client IDs
-      const [profiles, workoutLogs, allWorkoutLogs, programs, msgs] = await Promise.all([
+      const [profiles, workoutLogs, allWorkoutLogs, programs] = await Promise.all([
         selectInChunks<Profile>(supabase, 'profiles', '*', 'id', clientIds),
         selectInChunks<WorkoutLogRow>(supabase, 'workout_logs', 'client_id, logged_at', 'client_id', clientIds,
           (q) => q.not('completed_at', 'is', null).gte('logged_at', fiveWeeksAgo).order('logged_at', { ascending: false })),
@@ -69,8 +67,6 @@ export default function CoachDashboard() {
           (q) => q.not('completed_at', 'is', null).order('logged_at', { ascending: false }).limit(500)),
         selectInChunks<ProgramRow>(supabase, 'programs', 'client_id, name, start_date, id', 'client_id', clientIds,
           (q) => q.eq('is_active', true)),
-        selectInChunks<MessageRow>(supabase, 'messages', 'sender_id, read_at', 'sender_id', clientIds,
-          (q) => q.eq('coach_id', user.id).is('read_at', null)),
       ])
 
     // Last workout per client
@@ -108,12 +104,6 @@ export default function CoachDashboard() {
       if (!activeProgram[p.client_id]) activeProgram[p.client_id] = p
     })
 
-    // Unread messages
-    const unreadMap: Record<string, number> = {}
-    msgs.forEach(m => {
-      unreadMap[m.sender_id] = (unreadMap[m.sender_id] ?? 0) + 1
-    })
-
     const enriched: EnrichedClient[] = profiles.map(c => {
       const prog = activeProgram[c.id]
       const numWeeks = prog ? programWeeksMap[prog.id] ?? 4 : 4
@@ -127,7 +117,6 @@ export default function CoachDashboard() {
         lastWorkout: lastWorkout[c.id] ?? null,
         activeProgram: prog ?? null,
         daysLeft,
-        unread: unreadMap[c.id] ?? 0,
         sparkline: sparklineMap[c.id] ?? [0, 0, 0, 0, 0],
         compliance,
       }
@@ -145,7 +134,6 @@ export default function CoachDashboard() {
 
   function getUrgencyScore(client: EnrichedClient) {
     let score = 0
-    if (client.unread > 0) score += 100
     if (!client.lastWorkout) score += 50
     else {
       const days = differenceInDays(new Date(), new Date(client.lastWorkout))
@@ -246,7 +234,6 @@ export default function CoachDashboard() {
     await load()
   }
 
-  const totalUnread = clients.reduce((sum, c) => sum + c.unread, 0)
   const redClients = clients.filter(c => getStatusColor(c) === 'red').length
   const greenClients = clients.filter(c => getStatusColor(c) === 'green').length
 
@@ -275,7 +262,6 @@ export default function CoachDashboard() {
         <div className="flex gap-3 mt-4">
           <StatBox value={clients.length} label="Clients" />
           <StatBox value={redClients} label="Aandacht nodig" highlight={redClients > 0 ? 'red' : undefined} />
-          <StatBox value={totalUnread} label="Ongelezen" highlight={totalUnread > 0 ? 'orange' : undefined} />
           <StatBox value={greenClients} label="Op schema" color="text-green-400" />
         </div>
       </div>

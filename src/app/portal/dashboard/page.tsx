@@ -379,7 +379,7 @@ export default function DashboardPage() {
             { label: 'Trainingen', icon: '🏋️', href: '/portal/workouts' },
             { label: 'Voortgang', icon: '📈', href: '/portal/progress' },
             { label: 'Records', icon: '🏆', href: '/portal/records' },
-            { label: 'Berichten', icon: '💬', href: '/portal/messages' },
+            { label: 'Habits', icon: '✅', href: '/portal/habits' },
           ].map(({ label, icon, href }) => (
             <button
               key={href}

@@ -140,7 +140,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({ onSt
     <Card className="space-y-3">
       <div>
         <p className="text-white font-bold">Meldingen</p>
-        <p className="text-zinc-500 text-xs mt-0.5">Ontvang meldingen voor trainingsherinneringen en berichten</p>
+        <p className="text-zinc-500 text-xs mt-0.5">Ontvang meldingen voor trainingsherinneringen</p>
       </div>
 
       <div className={`py-2 ${getStatusColor()}`}>
@@ -156,7 +156,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({ onSt
       {permission === 'granted' && (
         <div className="text-xs text-green-400 bg-green-500/5 border border-green-500/30 rounded-lg p-3">
           <p className="font-medium">✓ Meldingen zijn actief</p>
-          <p className="text-zinc-400 mt-1">Je ontvangt nu trainingsherinneringen en berichten</p>
+          <p className="text-zinc-400 mt-1">Je ontvangt nu trainingsherinneringen</p>
         </div>
       )}
 

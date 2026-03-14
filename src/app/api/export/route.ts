@@ -24,7 +24,6 @@ export async function GET(request: Request) {
       nutritionLogsRes,
       dailyReadinessRes,
       progressMetricsRes,
-      messagesRes,
     ] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', user.id),
       supabase.from('workout_logs').select('*').eq('user_id', user.id),
@@ -34,9 +33,6 @@ export async function GET(request: Request) {
       supabase.from('nutrition_logs').select('*').eq('user_id', user.id),
       supabase.from('daily_readiness').select('*').eq('user_id', user.id),
       supabase.from('progress_metrics').select('*').eq('user_id', user.id),
-      supabase.from('messages').select('*').or(
-        `sender_id.eq.${user.id},receiver_id.eq.${user.id}`
-      ),
     ])
 
     // Compile all data
@@ -53,7 +49,6 @@ export async function GET(request: Request) {
         nutritionLogs: nutritionLogsRes.data || [],
         dailyReadiness: dailyReadinessRes.data || [],
         progressMetrics: progressMetricsRes.data || [],
-        messages: messagesRes.data || [],
       },
     }
 

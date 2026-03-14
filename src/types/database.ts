@@ -187,15 +187,6 @@ export interface CoachClient {
   active: boolean
 }
 
-export interface Message {
-  id: string
-  sender_id: string
-  receiver_id: string
-  content: string
-  read_at: string | null
-  created_at: string
-}
-
 // ─── Derived / View Types ────────────────────────────────────────────────────
 
 /** Used in the workout page for tracking sets in-progress */

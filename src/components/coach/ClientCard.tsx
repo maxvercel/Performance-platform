@@ -47,11 +47,6 @@ export function ClientCard({ client, statusColor, onClick }: ClientCardProps) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <p className="text-white font-bold text-sm">{client.full_name}</p>
-            {client.unread > 0 && (
-              <span className="bg-orange-500 text-white text-xs font-black px-1.5 py-0.5 rounded-full">
-                {client.unread}
-              </span>
-            )}
           </div>
 
           {/* Status pills */}
