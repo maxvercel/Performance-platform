@@ -1,20 +1,17 @@
 /**
  * Client-side image compression utility.
- * Resizes images to max 1920px and compresses to JPEG quality 0.8.
- * Typically reduces a 5-10MB phone photo to ~200-500KB.
+ * Resizes images to max 1200px and compresses to JPEG quality 0.7.
+ * Target: ~200-400KB per photo (saves 80-95% on typical phone photos).
  */
 
-const MAX_DIMENSION = 1920
-const JPEG_QUALITY = 0.8
+const MAX_DIMENSION = 1200
+const JPEG_QUALITY = 0.7
 
 export async function compressImage(file: File): Promise<File> {
-  // Skip compression for small files (< 500KB) or non-image types
-  if (file.size < 500 * 1024) return file
-
   // HEIC files can't be rendered in canvas — skip compression
   if (file.type === 'image/heic') return file
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const img = new Image()
     const url = URL.createObjectURL(file)
 
@@ -22,15 +19,6 @@ export async function compressImage(file: File): Promise<File> {
       URL.revokeObjectURL(url)
 
       let { width, height } = img
-
-      // Only resize if larger than max dimension
-      if (width <= MAX_DIMENSION && height <= MAX_DIMENSION) {
-        // Still compress quality even if dimensions are fine
-        if (file.size < 1024 * 1024) {
-          resolve(file)
-          return
-        }
-      }
 
       // Calculate new dimensions maintaining aspect ratio
       if (width > height) {
@@ -51,7 +39,7 @@ export async function compressImage(file: File): Promise<File> {
       canvas.height = height
       const ctx = canvas.getContext('2d')
       if (!ctx) {
-        resolve(file) // fallback
+        resolve(file)
         return
       }
       ctx.drawImage(img, 0, 0, width, height)
@@ -76,7 +64,7 @@ export async function compressImage(file: File): Promise<File> {
           })
 
           console.log(
-            `Image compressed: ${(file.size / 1024 / 1024).toFixed(1)}MB → ${(compressed.size / 1024 / 1024).toFixed(1)}MB (${Math.round((1 - compressed.size / file.size) * 100)}% smaller)`
+            `Image compressed: ${(file.size / 1024).toFixed(0)}KB → ${(compressed.size / 1024).toFixed(0)}KB (${Math.round((1 - compressed.size / file.size) * 100)}% smaller)`
           )
 
           resolve(compressed)
@@ -88,7 +76,7 @@ export async function compressImage(file: File): Promise<File> {
 
     img.onerror = () => {
       URL.revokeObjectURL(url)
-      resolve(file) // fallback to original on error
+      resolve(file)
     }
 
     img.src = url

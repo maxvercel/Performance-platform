@@ -354,20 +354,22 @@ export default function ProgressPage() {
 
     setUploadingPhoto(true)
 
-    // Compress image client-side (saves ~60-80% storage)
+    // Compress image client-side (saves 80-95% storage)
     const compressed = await compressImage(file)
 
-    const allowedExts = ['jpg', 'jpeg', 'png', 'webp', 'heic']
-    const ext = compressed.name.split('.').pop()?.toLowerCase() ?? 'jpg'
-    const safeExt = allowedExts.includes(ext) ? ext : 'jpg'
-    const fileName = `${profile.id}/${Date.now()}.${safeExt}`
+    // Always use .jpg extension since compression converts to JPEG
+    const fileName = `${profile.id}/${Date.now()}.jpg`
 
-    const { data: uploaded, error: uploadErr } = await supabase.storage
+    const { error: uploadErr } = await supabase.storage
       .from('progress-photos')
-      .upload(fileName, compressed)
+      .upload(fileName, compressed, {
+        contentType: compressed.type || 'image/jpeg',
+        upsert: false,
+      })
 
     if (uploadErr) {
       setUploadingPhoto(false)
+      console.error('Upload error:', uploadErr)
       throw new Error('Upload mislukt: ' + uploadErr.message)
     }
 
@@ -375,13 +377,22 @@ export default function ProgressPage() {
       .from('progress-photos')
       .getPublicUrl(fileName)
 
-    await supabase.from('progress_photos').insert({
+    const photoUrl = urlData.publicUrl
+    console.log('Photo URL:', photoUrl)
+
+    const { error: insertErr } = await supabase.from('progress_photos').insert({
       client_id: profile.id,
-      photo_url: urlData.publicUrl,
+      photo_url: photoUrl,
       category,
       taken_at: new Date().toISOString(),
       notes: notes || null,
     })
+
+    if (insertErr) {
+      setUploadingPhoto(false)
+      console.error('DB insert error:', insertErr)
+      throw new Error('Foto opslaan mislukt: ' + insertErr.message)
+    }
 
     await loadPhotos(profile.id)
     setUploadingPhoto(false)

@@ -111,11 +111,26 @@ export default function ProgressPhotos({
     saving: 90,
   }
 
-  const getPhotosForComparison = () => {
-    if (selectedFilter === 'all') return null
+  // Fullscreen photo state
+  const [fullscreenPhoto, setFullscreenPhoto] = useState<Photo | null>(null)
 
-    const categoryPhotos = photos.filter(p => p.category === selectedFilter)
-    if (categoryPhotos.length < 2) return null
+  const getPhotosForComparison = () => {
+    // If a specific category is selected, compare within that category
+    const targetCategory = selectedFilter !== 'all' ? selectedFilter : 'front'
+    const categoryPhotos = photos.filter(p => p.category === targetCategory)
+    if (categoryPhotos.length < 2) {
+      // Try any category with 2+ photos
+      for (const cat of ['front', 'side', 'back'] as const) {
+        const catPhotos = photos.filter(p => p.category === cat)
+        if (catPhotos.length >= 2) {
+          const sorted = [...catPhotos].sort((a, b) =>
+            parseISO(a.taken_at).getTime() - parseISO(b.taken_at).getTime()
+          )
+          return { before: sorted[0], after: sorted[sorted.length - 1] }
+        }
+      }
+      return null
+    }
 
     const sorted = [...categoryPhotos].sort((a, b) =>
       parseISO(a.taken_at).getTime() - parseISO(b.taken_at).getTime()
@@ -217,22 +232,26 @@ export default function ProgressPhotos({
                     key={photo.id}
                     className="group relative bg-zinc-800 rounded-lg overflow-hidden border border-zinc-700 hover:border-orange-500/50 transition-colors"
                   >
-                    {/* Image */}
-                    <div className="aspect-square overflow-hidden bg-zinc-900">
+                    {/* Image — click to fullscreen */}
+                    <div
+                      className="aspect-square overflow-hidden bg-zinc-900 cursor-pointer"
+                      onClick={() => setFullscreenPhoto(photo)}
+                    >
                       <img
                         src={photo.photo_url}
                         alt={`${categoryLabels[photo.category]} - ${date}`}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        loading="lazy"
                       />
                     </div>
 
                     {/* Overlay Actions */}
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
-                        onClick={() => onDelete(photo.id)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-red-500/90 hover:bg-red-600 rounded-lg"
+                        onClick={(e) => { e.stopPropagation(); onDelete(photo.id) }}
+                        className="p-1.5 bg-red-500/90 hover:bg-red-600 rounded-lg"
                       >
-                        <X size={18} />
+                        <X size={14} />
                       </button>
                     </div>
 
@@ -257,6 +276,39 @@ export default function ProgressPhotos({
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Fullscreen Photo Viewer */}
+      {fullscreenPhoto && (
+        <div
+          className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={() => setFullscreenPhoto(null)}
+        >
+          <button
+            onClick={() => setFullscreenPhoto(null)}
+            className="absolute top-4 right-4 p-2 bg-zinc-900/80 hover:bg-zinc-800 rounded-lg transition-colors z-10"
+          >
+            <X size={24} className="text-white" />
+          </button>
+          <div className="max-w-4xl max-h-[90vh] w-full flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={fullscreenPhoto.photo_url}
+              alt={categoryLabels[fullscreenPhoto.category]}
+              className="max-w-full max-h-[80vh] object-contain rounded-lg"
+            />
+            <div className="mt-3 text-center">
+              <span className={`px-3 py-1 text-xs font-bold rounded-full border ${categoryColors[fullscreenPhoto.category]}`}>
+                {categoryLabels[fullscreenPhoto.category]}
+              </span>
+              <p className="text-zinc-400 text-sm mt-2">
+                {format(parseISO(fullscreenPhoto.taken_at), 'EEEE d MMMM yyyy · HH:mm', { locale: nl })}
+              </p>
+              {fullscreenPhoto.notes && (
+                <p className="text-zinc-300 text-sm mt-1">{fullscreenPhoto.notes}</p>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
