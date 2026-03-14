@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { format, parseISO, subDays, addDays } from 'date-fns'
 import { nl } from 'date-fns/locale'
 import { useAuth } from '@/hooks/useAuth'
+import { useRouter } from 'next/navigation'
 import { PageSpinner } from '@/components/ui/Spinner'
 
 interface MealEntry {
@@ -78,7 +79,28 @@ const QUICK_ADD_ITEMS = [
 
 export default function NutritionPage() {
   const supabase = createClient()
+  const router = useRouter()
   const { profile, loading: authLoading } = useAuth()
+  const [featureChecked, setFeatureChecked] = useState(false)
+
+  // Check if nutrition is enabled for this client
+  useEffect(() => {
+    if (authLoading || !profile) return
+    if (profile.role === 'coach' || profile.role === 'admin') {
+      setFeatureChecked(true)
+      return
+    }
+    fetch(`/api/client-features?client_id=${profile.id}`)
+      .then(r => r.json())
+      .then(d => {
+        if (!d.features?.nutrition) {
+          router.push('/portal/dashboard')
+        } else {
+          setFeatureChecked(true)
+        }
+      })
+      .catch(() => setFeatureChecked(true))
+  }, [authLoading, profile?.id])
 
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [meals, setMeals] = useState<MealEntry[]>([])
@@ -316,7 +338,7 @@ export default function NutritionPage() {
 
   const pct = (val: number, target: number) => Math.min(100, Math.round((val / target) * 100))
 
-  if (authLoading || loading) return <PageSpinner />
+  if (authLoading || loading || !featureChecked) return <PageSpinner />
 
   return (
     <div className="min-h-screen bg-zinc-950 pb-24">

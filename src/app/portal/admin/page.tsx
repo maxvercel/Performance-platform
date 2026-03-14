@@ -20,6 +20,7 @@ interface ClientOverview {
   id: string
   full_name: string | null
   email: string
+  role: string
   coachName: string | null
   activeProgram: string | null
   workoutsThisWeek: number
@@ -37,6 +38,7 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState({ totalUsers: 0, totalCoaches: 0, totalClients: 0, totalWorkouts: 0 })
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'overview' | 'coaches' | 'clients'>('overview')
+  const [changingRole, setChangingRole] = useState<string | null>(null)
 
   useEffect(() => {
     if (authLoading) return
@@ -121,20 +123,22 @@ export default function AdminDashboard() {
     setCoaches(coachOverviews)
 
     // Client overzichten
-    const clientOverviews: ClientOverview[] = clientProfiles.map(client => {
-      const myCoachRel = coachClients?.find(cc => cc.client_id === client.id)
+    // All users overview (for role management)
+    const allUserOverviews: ClientOverview[] = allProfiles.map(user => {
+      const myCoachRel = coachClients?.find(cc => cc.client_id === user.id)
       const myCoach = myCoachRel ? coachProfiles.find(c => c.id === myCoachRel.coach_id) ?? allProfiles.find(p => p.id === myCoachRel.coach_id) : null
-      const myProgram = programs?.find(p => p.client_id === client.id)
-      const myWorkouts = recentWorkouts?.filter(w => w.client_id === client.id) ?? []
-      const myAllWorkouts = allWorkouts?.filter(w => w.client_id === client.id) ?? []
+      const myProgram = programs?.find(p => p.client_id === user.id)
+      const myWorkouts = recentWorkouts?.filter(w => w.client_id === user.id) ?? []
+      const myAllWorkouts = allWorkouts?.filter(w => w.client_id === user.id) ?? []
       const latestWorkout = myAllWorkouts.sort((a, b) =>
         new Date(b.logged_at).getTime() - new Date(a.logged_at).getTime()
       )[0]
 
       return {
-        id: client.id,
-        full_name: client.full_name,
-        email: client.email ?? '',
+        id: user.id,
+        full_name: user.full_name,
+        email: (user as any).email ?? '',
+        role: (user as any).role ?? 'client',
         coachName: myCoach?.full_name ?? 'Geen coach',
         activeProgram: myProgram?.name ?? null,
         workoutsThisWeek: myWorkouts.filter(w => w.completed_at).length,
@@ -142,8 +146,25 @@ export default function AdminDashboard() {
         totalExerciseLogs: 0,
       }
     })
+
+    const clientOverviews = allUserOverviews.filter(u => u.role === 'client')
     setClients(clientOverviews)
     setLoading(false)
+  }
+
+  async function changeRole(userId: string, newRole: 'client' | 'coach' | 'admin') {
+    setChangingRole(userId)
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role: newRole })
+      .eq('id', userId)
+    if (error) {
+      alert('Fout bij rol wijzigen: ' + error.message)
+    } else {
+      // Reload data
+      await loadAdminData()
+    }
+    setChangingRole(null)
   }
 
   if (authLoading || loading) return <PageSpinner />
@@ -182,20 +203,24 @@ export default function AdminDashboard() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2" role="tablist">
-          {(['overview', 'coaches', 'clients'] as const).map(tab => (
+        <div className="flex gap-2 flex-wrap" role="tablist">
+          {([
+            { key: 'overview', label: 'Overzicht' },
+            { key: 'coaches', label: `Coaches (${coaches.length})` },
+            { key: 'clients', label: `Cliënten (${clients.length})` },
+          ] as const).map(tab => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key as typeof activeTab)}
               role="tab"
-              aria-selected={activeTab === tab}
+              aria-selected={activeTab === tab.key}
               className={`px-4 py-2 rounded-full text-xs font-bold transition-all ${
-                activeTab === tab
+                activeTab === tab.key
                   ? 'bg-red-500 text-white shadow-lg shadow-red-500/20'
                   : 'bg-zinc-800/60 text-zinc-400'
               }`}
             >
-              {tab === 'overview' ? 'Overzicht' : tab === 'coaches' ? `Coaches (${coaches.length})` : `Cliënten (${clients.length})`}
+              {tab.label}
             </button>
           ))}
         </div>
@@ -273,6 +298,8 @@ export default function AdminDashboard() {
         {/* Clients tab */}
         {activeTab === 'clients' && (
           <div className="space-y-3">
+            <SectionHeader title="Rollenbeheer" />
+            <p className="text-zinc-500 text-xs">Wijs coach-rechten toe aan gebruikers. Coaches krijgen een extra tab om hun cliënten te beheren.</p>
             {clients.map(client => (
               <div key={client.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
                 <div className="flex items-center justify-between mb-2">
@@ -288,9 +315,33 @@ export default function AdminDashboard() {
                     {client.workoutsThisWeek > 0 ? `${client.workoutsThisWeek}x deze week` : 'Inactief'}
                   </span>
                 </div>
-                <div className="flex items-center gap-4 text-xs text-zinc-500">
+                <div className="flex items-center gap-4 text-xs text-zinc-500 mb-3">
                   <span>Programma: {client.activeProgram ?? 'Geen'}</span>
                   <span>Laatste workout: {formatDate(client.lastWorkout)}</span>
+                </div>
+                {/* Role toggle */}
+                <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
+                  <span className="text-zinc-500 text-xs mr-auto">Rol:</span>
+                  {(['client', 'coach', 'admin'] as const).map(role => (
+                    <button
+                      key={role}
+                      onClick={() => {
+                        if (client.role !== role) changeRole(client.id, role)
+                      }}
+                      disabled={changingRole === client.id}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        client.role === role
+                          ? role === 'admin'
+                            ? 'bg-red-500/20 text-red-400 ring-1 ring-red-500/40'
+                            : role === 'coach'
+                            ? 'bg-orange-500/20 text-orange-400 ring-1 ring-orange-500/40'
+                            : 'bg-zinc-700 text-white ring-1 ring-zinc-600'
+                          : 'bg-zinc-800/50 text-zinc-500 hover:text-zinc-300'
+                      }`}
+                    >
+                      {changingRole === client.id ? '...' : role === 'client' ? 'Client' : role === 'coach' ? 'Coach' : 'Admin'}
+                    </button>
+                  ))}
                 </div>
               </div>
             ))}

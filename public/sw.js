@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `9tofit-${CACHE_VERSION}`;
 const OFFLINE_CACHE_NAME = `9tofit-offline-${CACHE_VERSION}`;
 

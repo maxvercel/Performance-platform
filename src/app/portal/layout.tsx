@@ -12,6 +12,7 @@ function BottomNav() {
   const supabase = createClient()
   const [isCoach, setIsCoach] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [nutritionEnabled, setNutritionEnabled] = useState(false)
 
   // Initialize accent color on mount (replaces applyStoredAccent)
   useAccentColor()
@@ -22,13 +23,26 @@ function BottomNav() {
       supabase.from('profiles').select('role').eq('id', user.id).single()
         .then(({ data }) => {
           const role = data?.role as UserRole | undefined
-          if (role === 'coach' || role === 'admin') setIsCoach(true)
+          if (role === 'coach' || role === 'admin') {
+            setIsCoach(true)
+            setNutritionEnabled(true) // Coaches/admins always see nutrition
+          }
           if (role === 'admin') setIsAdmin(true)
+
+          // For clients: check if nutrition feature is enabled
+          if (!role || role === 'client') {
+            fetch(`/api/client-features?client_id=${user.id}`)
+              .then(r => r.json())
+              .then(d => {
+                if (d.features?.nutrition) setNutritionEnabled(true)
+              })
+              .catch(() => {})
+          }
         })
     })
   }, [supabase])
 
-  const tabs = [
+  const baseTabs = [
     { href: '/portal/dashboard', label: 'Overzicht', icon: (
       <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
@@ -40,12 +54,16 @@ function BottomNav() {
         <path d="M6 4v16M18 4v16M3 8h4M17 8h4M3 16h4M17 16h4"/>
       </svg>
     )},
-    { href: '/portal/nutrition', label: 'Voeding', icon: (
-      <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-        <path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/>
-        <line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>
-      </svg>
-    )},
+  ]
+
+  const nutritionTab = { href: '/portal/nutrition', label: 'Voeding', icon: (
+    <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+      <path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/>
+      <line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>
+    </svg>
+  )}
+
+  const afterTabs = [
     { href: '/portal/progress', label: 'Voortgang', icon: (
       <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
@@ -58,6 +76,10 @@ function BottomNav() {
       </svg>
     )},
   ]
+
+  const tabs = nutritionEnabled
+    ? [...baseTabs, nutritionTab, ...afterTabs]
+    : [...baseTabs, ...afterTabs]
 
   const coachTab = { href: '/portal/coach', label: 'Coach', icon: (
     <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">

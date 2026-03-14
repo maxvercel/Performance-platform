@@ -41,8 +41,32 @@ export default function ClientDetail() {
   const [editingExercise, setEditingExercise] = useState<string | null>(null)
   const [editValues, setEditValues] = useState<{ sets?: number; reps?: number; weight_kg?: number | null; rest_seconds?: number | null; notes?: string }>({})
   const [savingExercise, setSavingExercise] = useState<string | null>(null)
+  // Feature toggles
+  const [features, setFeatures] = useState<Record<string, boolean>>({})
+  const [togglingFeature, setTogglingFeature] = useState<string | null>(null)
 
-  useEffect(() => { load() }, [clientId])
+  useEffect(() => { load(); loadFeatures() }, [clientId])
+
+  async function loadFeatures() {
+    try {
+      const res = await fetch(`/api/client-features?client_id=${clientId}`)
+      const data = await res.json()
+      if (data.features) setFeatures(data.features)
+    } catch { /* ignore */ }
+  }
+
+  async function toggleFeature(feature: string, enabled: boolean) {
+    setTogglingFeature(feature)
+    try {
+      await fetch('/api/client-features', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: clientId, feature, enabled }),
+      })
+      setFeatures(prev => ({ ...prev, [feature]: enabled }))
+    } catch { alert('Fout bij feature toggle') }
+    setTogglingFeature(null)
+  }
 
   async function load() {
     const { data: { user } } = await supabase.auth.getUser()
@@ -418,6 +442,36 @@ export default function ClientDetail() {
             <h1 className="text-white font-black text-lg">{client?.full_name}</h1>
             <p className="text-zinc-500 text-xs">{client?.email}</p>
           </div>
+        </div>
+      </div>
+
+      {/* Feature toggles */}
+      <div className="bg-zinc-900/50 px-5 py-3 border-b border-zinc-800 flex-shrink-0">
+        <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-2">Modules</p>
+        <div className="flex gap-2 flex-wrap">
+          {[
+            { key: 'nutrition', label: 'Voeding', icon: '🥗' },
+          ].map(feat => {
+            const enabled = features[feat.key] ?? false
+            return (
+              <button
+                key={feat.key}
+                onClick={() => toggleFeature(feat.key, !enabled)}
+                disabled={togglingFeature === feat.key}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                  enabled
+                    ? 'bg-green-500/15 text-green-400 ring-1 ring-green-500/30'
+                    : 'bg-zinc-800/60 text-zinc-500'
+                }`}
+              >
+                <span>{feat.icon}</span>
+                <span>{feat.label}</span>
+                <span className={`w-8 h-4 rounded-full relative transition-colors ${enabled ? 'bg-green-500' : 'bg-zinc-700'}`}>
+                  <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${enabled ? 'left-4' : 'left-0.5'}`} />
+                </span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
