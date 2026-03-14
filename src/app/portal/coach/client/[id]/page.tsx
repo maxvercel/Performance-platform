@@ -58,13 +58,20 @@ export default function ClientDetail() {
   async function toggleFeature(feature: string, enabled: boolean) {
     setTogglingFeature(feature)
     try {
-      await fetch('/api/client-features', {
+      const res = await fetch('/api/client-features', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ client_id: clientId, feature, enabled }),
       })
-      setFeatures(prev => ({ ...prev, [feature]: enabled }))
-    } catch { alert('Fout bij feature toggle') }
+      const data = await res.json()
+      if (!res.ok) {
+        alert('Fout: ' + (data.error || 'Onbekende fout'))
+      } else {
+        setFeatures(prev => ({ ...prev, [feature]: enabled }))
+      }
+    } catch (err) {
+      alert('Fout bij feature toggle: ' + (err instanceof Error ? err.message : 'Onbekende fout'))
+    }
     setTogglingFeature(null)
   }
 
