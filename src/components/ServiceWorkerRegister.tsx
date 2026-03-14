@@ -30,7 +30,7 @@ export default function ServiceWorkerRegister() {
               console.log('[PWA] New Service Worker available');
 
               // Notify user about update (optional)
-              if (confirm('A new version of 9toFit is available. Update now?')) {
+              if (confirm('Er is een nieuwe versie van 9toFit beschikbaar. Nu updaten?')) {
                 newWorker.postMessage({ type: 'SKIP_WAITING' });
                 window.location.reload();
               }
@@ -41,7 +41,7 @@ export default function ServiceWorkerRegister() {
         // Check for updates periodically
         setInterval(() => {
           registration.update();
-        }, 60000); // Check every minute
+        }, 3600000); // Check every hour
 
       } catch (error) {
         console.error('[PWA] Service Worker registration failed:', error);

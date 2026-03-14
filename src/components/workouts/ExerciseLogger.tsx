@@ -52,6 +52,7 @@ export default function ExerciseLogger({ programExercise, workoutLogId }: Props)
 
     if (error) {
       console.error('exercise_logs INSERT error:', error)
+      alert('Set opslaan mislukt. Probeer opnieuw.')
       return
     }
 

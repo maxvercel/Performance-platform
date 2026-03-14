@@ -17,7 +17,7 @@ export default function WeightLogger({ userId, onSaved }: { userId: string, onSa
     const { error: insertError } = await supabase.from('progress_metrics').insert({
       client_id: userId,
       weight_kg: parseFloat(weight),
-      logged_at: new Date().toISOString().split('T')[0]
+      logged_at: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0]
     })
 
     setSaving(false)

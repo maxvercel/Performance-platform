@@ -36,11 +36,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // Verify the user is a coach/admin
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single()
+
+  if (!profile || !['coach', 'admin'].includes(profile.role)) {
+    return NextResponse.json({ error: 'Alleen coaches en admins mogen features wijzigen' }, { status: 403 })
+  }
+
   const body = await request.json()
   const { client_id, feature, enabled } = body
 
   if (!client_id || !feature || typeof enabled !== 'boolean') {
     return NextResponse.json({ error: 'client_id, feature en enabled vereist' }, { status: 400 })
+  }
+
+  // Validate feature name
+  const allowedFeatures = ['nutrition']
+  if (!allowedFeatures.includes(feature)) {
+    return NextResponse.json({ error: 'Onbekende feature' }, { status: 400 })
   }
 
   // Upsert the feature toggle

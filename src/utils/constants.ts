@@ -139,7 +139,7 @@ export const RANK_ORDER: Record<string, number> = {
  */
 export function getRank(prCount: number, improvementPct: number): RankInfo {
   for (const rank of RANKS) {
-    if (prCount >= rank.minPRs || improvementPct >= rank.minPct) return rank
+    if (prCount >= rank.minPRs && improvementPct >= rank.minPct) return rank
   }
   return RANKS[RANKS.length - 1]
 }

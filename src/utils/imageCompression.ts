@@ -11,7 +11,12 @@ export async function compressImage(file: File): Promise<File> {
   // HEIC files can't be rendered in canvas — skip compression
   if (file.type === 'image/heic') return file
 
-  return new Promise((resolve) => {
+  // Timeout after 10s — return original file if compression takes too long
+  return Promise.race([
+    new Promise<File>((resolve) => {
+      setTimeout(() => resolve(file), 10000)
+    }),
+    new Promise<File>((resolve) => {
     const img = new Image()
     const url = URL.createObjectURL(file)
 
@@ -80,5 +85,6 @@ export async function compressImage(file: File): Promise<File> {
     }
 
     img.src = url
-  })
+  }),
+  ])
 }

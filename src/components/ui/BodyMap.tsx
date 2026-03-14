@@ -44,7 +44,7 @@ export const BodyMap: React.FC<BodyMapProps> = ({
 
   const getMuscleOpacity = (muscleGroup: string): number => {
     if (!volumeData || !volumeData[muscleGroup]) {
-      return highlightedSet.has(muscleGroup) ? 1 : 1;
+      return highlightedSet.has(muscleGroup) ? 0.8 : 0.15;
     }
     const maxVolume = Math.max(...Object.values(volumeData));
     return Math.max(0.4, volumeData[muscleGroup] / maxVolume);
