@@ -147,8 +147,7 @@ export default function AdminDashboard() {
       }
     })
 
-    const clientOverviews = allUserOverviews.filter(u => u.role === 'client')
-    setClients(clientOverviews)
+    setClients(allUserOverviews)
     setLoading(false)
   }
 
@@ -207,7 +206,7 @@ export default function AdminDashboard() {
           {([
             { key: 'overview', label: 'Overzicht' },
             { key: 'coaches', label: `Coaches (${coaches.length})` },
-            { key: 'clients', label: `Cliënten (${clients.length})` },
+            { key: 'clients', label: `Gebruikers (${clients.length})` },
           ] as const).map(tab => (
             <button
               key={tab.key}
@@ -298,14 +297,23 @@ export default function AdminDashboard() {
         {/* Clients tab */}
         {activeTab === 'clients' && (
           <div className="space-y-3">
-            <SectionHeader title="Rollenbeheer" />
-            <p className="text-zinc-500 text-xs">Wijs coach-rechten toe aan gebruikers. Coaches krijgen een extra tab om hun cliënten te beheren.</p>
+            <SectionHeader title="Gebruikers & Rollenbeheer" />
+            <p className="text-zinc-500 text-xs">Wijs rollen toe aan gebruikers. Coaches krijgen een extra tab om hun cliënten te beheren.</p>
             {clients.map(client => (
               <div key={client.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div>
-                    <p className="text-white font-bold text-sm">{client.full_name || client.email}</p>
-                    <p className="text-zinc-500 text-xs">Coach: {client.coachName}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-white font-bold text-sm">{client.full_name || client.email}</p>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        client.role === 'admin' ? 'bg-red-500/20 text-red-400' :
+                        client.role === 'coach' ? 'bg-orange-500/20 text-orange-400' :
+                        'bg-zinc-800 text-zinc-500'
+                      }`}>
+                        {client.role}
+                      </span>
+                    </div>
+                    <p className="text-zinc-500 text-xs">{client.email}</p>
                   </div>
                   <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
                     client.workoutsThisWeek > 0
@@ -314,10 +322,6 @@ export default function AdminDashboard() {
                   }`}>
                     {client.workoutsThisWeek > 0 ? `${client.workoutsThisWeek}x deze week` : 'Inactief'}
                   </span>
-                </div>
-                <div className="flex items-center gap-4 text-xs text-zinc-500 mb-3">
-                  <span>Programma: {client.activeProgram ?? 'Geen'}</span>
-                  <span>Laatste workout: {formatDate(client.lastWorkout)}</span>
                 </div>
                 {/* Role toggle */}
                 <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
